@@ -1,0 +1,38 @@
+
+CABIN Benthic data wrangling -- 
+
+This is data downloaded from all regions within the Canadian Aquatic Biomonitoring Network.
+
+
+```{r}
+
+library(png)
+library(dplyr)
+library(tidyverse)
+library(reticulate)
+library(zoo)
+library(lubridate)
+library(ggplot2)
+library(sf)
+library(mapview)
+library(gridExtra)
+library(data.table)
+
+```
+
+1)Load in Benthic CABIN data in one dataframe, with a column of the REgion
+
+```{r}
+
+library(data.table)
+files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_benthic.*?\\.csv", full.names = TRUE) 
+df_benthic <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region") 
+
+```
+
+```{r}
+
+
+
+```
+
