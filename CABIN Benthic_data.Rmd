@@ -20,19 +20,53 @@ library(data.table)
 
 ```
 
-1)Load in Benthic CABIN data in one dataframe, with a column of the REgion
+1)Load in Benthic CABIN data in one dataframe, with a column of the Region
 
 ```{r}
 
 library(data.table)
 files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_benthic.*?\\.csv", full.names = TRUE) 
-df_benthic <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region") 
+df_benthic <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
 
 ```
 
+2)Rename the columns to be easier to work with
 ```{r}
 
+df_benthic <- df_benthic %>%
+  rename("Site_Visit_ID" = 'SiteVisitID/IdentifiantdeVisite',
+         "Site" = "Site/Site",
+         "Year" = "Year/Année",
+         "Sampling_Device" = "SamplingDevice/Dispositifd'échantillonnage",
+         "Kick_Time" = "KickTime/Périodedelapassedufilettroubleau",
+         "Mesh_size" = "MeshSize/Maillage",
+         "Subsample" =	"SubSample/Sous-échantillon",
+         "Julian_day" ="JulianDay/JourJulien",
+         "Sample_Number" = "SampleNumber/Numérod'échantillon",
+         "Total_sample" ="TotalSample/Échantillontotal",
+         "status" = "Status/État",
+         "Taxonomist" = "Taxonomist/Taxonomiste",
+         "organization" = "Organization/Organisation",
+         "address" = "Address/Adresser",
+         "city" = "City/Ville",
+         "province" = "Province/Province",
+         "phylum" = "Phylum/Phylum",
+         "class" = "Class/Classe",
+         "Order" = "Order/Ordre",
+         "Family" = "Family/Famille",
+         "Genus" = "Genus/Genre",
+         "Species" = "Species/Espèce",
+         "Replicate" = "Replicate/Réplicat",
+         "Count" = "Count/Décompte",
+         "ITIS" ="ITIS_TSN",
+         "Valid" = "Valid/Valide")
+  
+```
 
+3) Select only the test data 
+```{r}
+df_benthic_test <- df_benthic %>%
+ filter(status == "Potential Reference" | status == "Reference" | status == "NA")
 
 ```
 
