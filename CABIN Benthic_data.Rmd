@@ -44,7 +44,7 @@ df_benthic <- df_benthic %>%
          "Julian_day" ="JulianDay/JourJulien",
          "Sample_Number" = "SampleNumber/Numérod'échantillon",
          "Total_sample" ="TotalSample/Échantillontotal",
-         "status" = "Status/État",
+         "Status" = "Status/État",
          "Taxonomist" = "Taxonomist/Taxonomiste",
          "organization" = "Organization/Organisation",
          "address" = "Address/Adresser",
@@ -65,8 +65,46 @@ df_benthic <- df_benthic %>%
 
 3) Select only the test data 
 ```{r}
-df_benthic_test <- df_benthic %>%
- filter(status == "Potential Reference" | status == "Reference" | status == "NA")
+
+#change Status and Subsample Nas to "Unknown" because filter automatically removes NAs.
+benthic_no_test <- df_benthic %>%
+  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% #have correct # of regions til now
+  filter(Status != "Test") %>%
+  #remove site, just reduce to however many subsamples there are
+  select(Region, Subsample, Status) %>% 
+  distinct() %>%
+  mutate_at(c('Subsample'), as.numeric) 
+  
+  
+```
+
+
+```{r}
+
+
+
+
+
+```
+
+
+```{r}
+
+
+```
+
+
+
+```{r}
+
+
+
+```
+
+
+```{r}
+
+
 
 ```
 
