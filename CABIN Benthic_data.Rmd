@@ -17,6 +17,7 @@ library(sf)
 library(mapview)
 library(gridExtra)
 library(data.table)
+library(scales)
 
 ```
 
@@ -32,7 +33,6 @@ df_benthic <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id 
 
 2)Rename the columns to be easier to work with
 ```{r}
-
 df_benthic <- df_benthic %>%
   rename("Site_Visit_ID" = 'SiteVisitID/IdentifiantdeVisite',
          "Site" = "Site/Site",
@@ -60,7 +60,15 @@ df_benthic <- df_benthic %>%
          "Count" = "Count/Décompte",
          "ITIS" ="ITIS_TSN",
          "Valid" = "Valid/Valide")
-  
+```
+
+Add the region names using the region names file
+```{r}
+Region_names <- read.csv("Region_names.csv", colClasses =c("character", "character", "character")) 
+
+df_benthic <- full_join(df_benthic, Region_names, by = 'Region')
+
+
 ```
 
 3) Select only the test data 
@@ -71,12 +79,47 @@ benthic_no_test <- df_benthic %>%
   replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% #have correct # of regions til now
   filter(Status != "Test") %>%
   #remove site, just reduce to however many subsamples there are
-  select(Region, Subsample, Status) %>% 
+  select(Region_Name, Subsample, Status) %>% 
   distinct() %>%
-  mutate_at(c('Subsample'), as.numeric) 
+  mutate_at(c('Subsample'), as.numeric) %>%
   
   
+  
 ```
+
+
+```{r}
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
+
+ggplot(benthic_no_test, aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
+geom_boxplot() +
+  theme_bw() +
+    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
+       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+   stat_boxplot(geom = "errorbar", width = 0.25) +
+  ggtitle( "Percent Sorted by Region \n(Potential Reference or Reference Sites) ") +
+  theme(legend.position = 'none') +
+    #theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
+scale_x_discrete(labels = wrap_format(10)) +
+  ylab("Percent Sorted") +
+    scale_fill_manual(values=cbPalette)
+    #scale_fill_brewer(palette= )
+
+#outlier of 300... ponar sampling device ??
+#doesn't look like much difference between %sorted. 
+
+
+
+
+```
+
+
+```{r}
+
+unique(df_benthic$Sampling_Device)
+
+```
+
 
 
 ```{r}
@@ -90,19 +133,6 @@ benthic_no_test <- df_benthic %>%
 
 ```{r}
 
-
-```
-
-
-
-```{r}
-
-
-
-```
-
-
-```{r}
 
 
 
