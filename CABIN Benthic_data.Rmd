@@ -1,8 +1,9 @@
 
-CABIN Benthic data wrangling -- 
+##CABIN Benthic data  -- 
 
-This is data downloaded from all regions within the Canadian Aquatic Biomonitoring Network.
+Data from all regions within the Canadian Aquatic Biomonitoring Network.
 
+##Part 1: Is there a difference between the percent sorted of samples by region?
 
 ```{r}
 
@@ -17,11 +18,13 @@ library(sf)
 library(mapview)
 library(gridExtra)
 library(data.table)
-library(scales)
-
+library(scales) 
+library(AICcmodavg)
+library(lme4)
+library(MASS)
 ```
 
-1)Load in Benthic CABIN data in one dataframe, with a column of the Region
+A) Load in Benthic CABIN data in one dataframe, with a column of the Region
 
 ```{r}
 
@@ -31,7 +34,19 @@ df_benthic <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id 
 
 ```
 
-2)Rename the columns to be easier to work with
+
+Load in Study (meta) CABIN data in one dataframe, with a column of the Region.
+This has the lat/long coordinates
+
+```{r}
+library(data.table)
+files_s <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_study.*?\\.csv", full.names = TRUE) 
+df_study <- map_df(files_s, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
+
+```
+
+
+B) Rename the columns to be easier to work with - just for the benthic data
 ```{r}
 df_benthic <- df_benthic %>%
   rename("Site_Visit_ID" = 'SiteVisitID/IdentifiantdeVisite',
@@ -60,9 +75,10 @@ df_benthic <- df_benthic %>%
          "Count" = "Count/Décompte",
          "ITIS" ="ITIS_TSN",
          "Valid" = "Valid/Valide")
+
 ```
 
-Add the region names using the region names file
+C) Add the region names to the benthic data using the region names file
 ```{r}
 Region_names <- read.csv("Region_names.csv", colClasses =c("character", "character", "character")) 
 
@@ -71,27 +87,126 @@ df_benthic <- full_join(df_benthic, Region_names, by = 'Region')
 
 ```
 
-3) Select only the test data 
+D) Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-". 
+benthic data: 
+
 ```{r}
 
-#change Status and Subsample Nas to "Unknown" because filter automatically removes NAs.
-benthic_no_test <- df_benthic %>%
-  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% #have correct # of regions til now
-  filter(Status != "Test") %>%
-  #remove site, just reduce to however many subsamples there are
-  select(Region_Name, Subsample, Status) %>% 
-  distinct() %>%
-  mutate_at(c('Subsample'), as.numeric) %>%
-  
-  
+df_benthic_newsite <- df_benthic %>%
+  tidyr::unite("Unique_Id", c("Site_Visit_ID", "Site", "Year" ), sep = "_", remove = FALSE )
+
+
+```
+
+Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-"
+study metadata:
+
+```{r}
+
+df_study_newsite <- df_study %>%
+  tidyr::unite("Unique_Id", c("SiteVisitID", "Site", "Year"), sep =  "_", remove = FALSE) 
+
+```
+
+Sanity check- make sure the lengths of each new id column are the same, otherwise we might be missing data
+```{r}
+
+length(unique(df_benthic_newsite$Unique_Id))
+length(unique(df_study_newsite$Unique_Id))
+
+#they're not the same, 400 less sites from the benthic data
+
+```
+
+Sanity checks continued, checking the number of unique IDs for each region for the study and benthic data 
+```{r}
+#when I check regions 1-10 by changing "LIKE" number, unique length is different for every region. Maybe this is because there are additional habitat data or WQ observations, and this is where the difference is?
+
+library(sqldf)
+
+Region_benthic <- sqldf("select * from df_benthic_newsite where Region Like '10' ")
+Region_study <- sqldf("Select * from df_study_newsite where Region Like '10' ")
+
+length(unique(Region_benthic$Unique_Id))
+length(unique(Region_study$Unique_Id))
+
+#Keep going, because it's likely just extra data. Going forwards make sure there are the same unique_id's for the data before and after the study-benthic join
+
+
+```
+
+E) Join the study data and benthic data by the newly created Unique_Id column
+```{r}
+
+
+df_both <- left_join(df_benthic_newsite, df_study_newsite, by =  "Unique_Id")
+
+
+#df both has 12028, which is the same as df_benthic. Left join retained all of the benthic sites, and it looks like they all have lat/long on them. Winner!!
   
 ```
 
+Sanity checkpoint- check NAs
+```{r}
 
+colSums(is.na(df_both)) #2863 NAs in subsample, none in status. 
+
+```
+
+More sanity checks- count number of test, potential test, and reference sites there are 
+```{r}
+
+#df_both = subset(df_both, select = -c(province, Province))
+
+length(unique(df_both$Unique_Id)) #12028
+
+
+num_ref_sites <- sqldf( " select Status, Unique_Id
+                     from df_both Where Status Like '%Refere%' 
+                      Group by Unique_Id")
+
+
+#number of no test (ref or pot ref) sites are 5623
+
+num_test_sites <- sqldf("select Status, Unique_Id
+                         from df_both where Status LIKE 'Test'
+                         Group by Unique_Id")
+
+#number of test sites are 6458, ref sites are 5623
+#6458+5623 = 12081, which is  > 12028 ?? why
+
+```
+
+E) Start to prep for graphing % sorted by region, by selecting only the reference or potential reference sites
+```{r}
+
+#change Status and Subsample NAs to "Unknown" because apparently filter automatically removes NAs.
+df_no_test <- df_both %>%
+ replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
+  filter(Status == "Reference" | Status == "Potential Reference") %>%
+  dplyr::select(Unique_Id, Region_Name, Subsample, Status) %>%
+  distinct() %>%
+  mutate_at(c('Subsample'), as.numeric) 
+
+
+df_test <- df_both %>%
+  #replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
+  filter(Status == "Test" ) %>%
+  dplyr::select(Unique_Id, Region_Name, Subsample, Status) %>%
+  distinct() %>%
+  mutate_at(c('Subsample'), as.numeric)
+
+length(unique(df_no_test$Unique_Id))
+
+length(unique(df_test$Unique_Id))
+
+```
+
+Graph of percent sorted, by region. It does not appear that there is a difference between percent sorted between regions, but the Arctic Drainage Area outlier could be skewing the data.
 ```{r}
 cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
 
-ggplot(benthic_no_test, aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
+ggplot(df_no_test, aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
 geom_boxplot() +
   theme_bw() +
     theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
@@ -103,12 +218,41 @@ geom_boxplot() +
 scale_x_discrete(labels = wrap_format(10)) +
   ylab("Percent Sorted") +
     scale_fill_manual(values=cbPalette)
-    #scale_fill_brewer(palette= )
 
 #outlier of 300... ponar sampling device ??
 #doesn't look like much difference between %sorted. 
 
+```
 
+Graph of percent sorted, by region, without the Arctic Drainage Area outlier.
+```{r}
+
+df_no_test %>% 
+  filter(Subsample <= 100) %>%
+  ggplot( aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
+geom_boxplot() +
+  theme_bw() +
+    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
+       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+   stat_boxplot(geom = "errorbar", width = 0.25) +
+  ggtitle( "Percent Sorted by Region \n(Potential Reference or Reference Sites) ") +
+  theme(legend.position = 'none') +
+    #theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
+scale_x_discrete(labels = wrap_format(10)) +
+  ylab("Percent Sorted") +
+    scale_fill_manual(values=cbPalette)
+
+
+```
+
+How many measurements of % sorted are there for each region? - (ie n)
+```{r}
+
+# run this to see n for each region
+ dplyr::count(df_no_test, Region_Name, sort = TRUE) %>%
+  mutate(sum(n))
+
+#why is it 5795 and not 5623? we have 172 points more...
 
 
 ```
@@ -116,25 +260,43 @@ scale_x_discrete(labels = wrap_format(10)) +
 
 ```{r}
 
-unique(df_benthic$Sampling_Device)
+
+```
+
+
+```{r}
+```
+
+
+##Part 2: Is there a difference between the samples, by latitude? 
+
+```{r}
+
+```
+
+
+```{r}
+
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+
 
 ```
 
 
 
 ```{r}
-
-
-
-
-
 ```
 
 
 ```{r}
-
-
-
-
 ```
 
