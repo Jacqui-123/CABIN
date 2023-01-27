@@ -1,9 +1,9 @@
 
 ##CABIN Benthic data  -- 
 
-Data from all regions within the Canadian Aquatic Biomonitoring Network.
+Data wrangling, tidying and analysis for all regions within the Canadian Aquatic Biomonitoring Network.
 
-##Part 1: Is there a difference between the percent sorted of samples by region?
+##Part 1: Is there a difference between the percent sorted of samples, by region? 
 
 ```{r}
 
@@ -46,7 +46,7 @@ df_study <- map_df(files_s, ~read_csv(., col_types = cols(.default = "c")), .id 
 ```
 
 
-B) Rename the columns to be easier to work with - just for the benthic data
+B) Rename the columns to be easier to work with - just for the benthic data, I did this in excel for the study data due to the French characters misbehaving (they refused to convert to UTF-8)
 ```{r}
 df_benthic <- df_benthic %>%
   rename("Site_Visit_ID" = 'SiteVisitID/IdentifiantdeVisite',
@@ -78,7 +78,9 @@ df_benthic <- df_benthic %>%
 
 ```
 
-C) Add the region names to the benthic data using the region names file
+D) Get set up to join the benthic and study data sets.
+
+Add the region names to the benthic data using the region names file (I made this file in excel)
 ```{r}
 Region_names <- read.csv("Region_names.csv", colClasses =c("character", "character", "character")) 
 
@@ -87,7 +89,7 @@ df_benthic <- full_join(df_benthic, Region_names, by = 'Region')
 
 ```
 
-D) Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-". 
+Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-". This is so we have a unique id for each site visit and year.
 benthic data: 
 
 ```{r}
@@ -95,11 +97,9 @@ benthic data:
 df_benthic_newsite <- df_benthic %>%
   tidyr::unite("Unique_Id", c("Site_Visit_ID", "Site", "Year" ), sep = "_", remove = FALSE )
 
-
 ```
 
-Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-"
-study metadata:
+Do the same for the study data. Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-"
 
 ```{r}
 
@@ -115,90 +115,140 @@ length(unique(df_benthic_newsite$Unique_Id))
 length(unique(df_study_newsite$Unique_Id))
 
 #they're not the same, 400 less sites from the benthic data
+#could be due to WQ data or other data?
 
 ```
 
 Sanity checks continued, checking the number of unique IDs for each region for the study and benthic data 
 ```{r}
-#when I check regions 1-10 by changing "LIKE" number, unique length is different for every region. Maybe this is because there are additional habitat data or WQ observations, and this is where the difference is?
+#when I check regions 1-10 by changing "LIKE" number, unique length is different for every region. Maybe this is because there are additional habitat data or WQ observations, and this is where the difference is? There are consistently more obs for study/meta data.
 
 library(sqldf)
 
-Region_benthic <- sqldf("select * from df_benthic_newsite where Region Like '10' ")
-Region_study <- sqldf("Select * from df_study_newsite where Region Like '10' ")
+Region_benthic <- sqldf("select * from df_benthic_newsite where Region Like '1' ")
+Region_study <- sqldf("Select * from df_study_newsite where Region Like '1' ")
 
 length(unique(Region_benthic$Unique_Id))
 length(unique(Region_study$Unique_Id))
 
-#Keep going, because it's likely just extra data. Going forwards make sure there are the same unique_id's for the data before and after the study-benthic join
+#Keep going, because it's likely just just due to other data sources. Going forwards make sure there are the same unique_id's for the benthic data as after the study-benthic join. (n=12028 )
 
 
 ```
 
-E) Join the study data and benthic data by the newly created Unique_Id column
+Finally, join the study data and benthic data by the newly created Unique_Id column
 ```{r}
 
+df_both <- left_join(df_benthic_newsite, df_study_newsite,  by =  "Unique_Id") 
 
-df_both <- left_join(df_benthic_newsite, df_study_newsite, by =  "Unique_Id")
+length(unique(df_both$Unique_Id)) # should be n=12028 
 
-
-#df both has 12028, which is the same as df_benthic. Left join retained all of the benthic sites, and it looks like they all have lat/long on them. Winner!!
+#df both has 12028, which is the same as df_benthic. Left join retained all of the benthic sites, and it looks like they all have lat/long on them.
   
+```
+
+ 
+E) Get ready to graph.
+
+Make a new column to account for the sample numbers- there are multiple sample numbers for each Unique_Id, with varying test/ref/pot ref. If we don't do this, it means that there are overlapping data points in the test and ref/pot ref graphs. 
+
+```{r}
+
+df_both <- df_both %>%
+  tidyr::unite("Unique_Id_Sample", c("Unique_Id", "Sample_Number"), sep =  "_", remove = FALSE) 
+
+length(unique(df_both$Unique_Id_Sample)) #n = 13399
+
 ```
 
 Sanity checkpoint- check NAs
 ```{r}
 
-colSums(is.na(df_both)) #2863 NAs in subsample, none in status. 
+colSums(is.na(df_both_samp)) #We still have 2863 NAs in Subsample and none in Status. 
 
 ```
 
-More sanity checks- count number of test, potential test, and reference sites there are 
+More sanity checks- count number of test, potential test, and reference sites there are. These should add to 13399
 ```{r}
-
 #df_both = subset(df_both, select = -c(province, Province))
 
-length(unique(df_both$Unique_Id)) #12028
+length(unique(df_both$Unique_Id_Sample)) #13399
 
 
-num_ref_sites <- sqldf( " select Status, Unique_Id
-                     from df_both Where Status Like '%Refere%' 
-                      Group by Unique_Id")
+num_ref_sites <- sqldf( " select Status, Unique_Id_Sample
+                     from df_both_samp Where Status Like '%Refere%' 
+                      Group by Unique_Id_Sample")
 
 
 #number of no test (ref or pot ref) sites are 5623
 
-num_test_sites <- sqldf("select Status, Unique_Id
-                         from df_both where Status LIKE 'Test'
-                         Group by Unique_Id")
+num_test_sites <- sqldf("select Status, Unique_Id_Sample
+                         from df_both_samp where Status LIKE 'Test'
+                         Group by Unique_Id_Sample")
 
-#number of test sites are 6458, ref sites are 5623
-#6458+5623 = 12081, which is  > 12028 ?? why
+
+#this checks out
+#number of test sites are 7510, number of ref/pot ref sites 5889. Adding them = 13399
+```
+
+What Region has the NA's for Subsample?
+```{r}
+
+Reg2 <- sqldf( " Select * from df_both_samp where Region_Name LIKE 'St. Lawrence Drainage Area'  " )
+colSums(is.na(Reg2)) #all the 2863 NAs are in Region 2. 
+#consider removing Region 2 when graphing? Reg2 = St. Lawrence Drainage Area
 
 ```
 
-E) Start to prep for graphing % sorted by region, by selecting only the reference or potential reference sites
-```{r}
+Continue graphing prep! 
 
+First graph: 
+
+Percent sorted by region. Select only the reference or potential reference sites
+```{r}
 #change Status and Subsample NAs to "Unknown" because apparently filter automatically removes NAs.
 df_no_test <- df_both %>%
  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
-  filter(Status == "Reference" | Status == "Potential Reference") %>%
-  dplyr::select(Unique_Id, Region_Name, Subsample, Status) %>%
+  filter(Status == "Reference" | Status == "Potential Reference") %>% 
+  dplyr::select(Unique_Id_Sample, Region_Name, Subsample, Status, Latitude, Longitude) %>%
   distinct() %>%
   mutate_at(c('Subsample'), as.numeric) 
 
-
 df_test <- df_both %>%
-  #replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
+  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Test" ) %>%
-  dplyr::select(Unique_Id, Region_Name, Subsample, Status) %>%
+  dplyr::select(Unique_Id_Sample, Region_Name, Subsample, Status, Latitude, Longitude) %>%
   distinct() %>%
   mutate_at(c('Subsample'), as.numeric)
 
-length(unique(df_no_test$Unique_Id))
+length(unique(df_no_test$Unique_Id_Sample)) #5889
+length(unique(df_test$Unique_Id_Sample)) #7510
+#these add to 13399
 
-length(unique(df_test$Unique_Id))
+```
+
+
+Ignore this - this was to be able to figure out the overlapping sites in test/reference sites. Turns out it was due to sampling numbers not being accounted for. It's fixed now 
+```{r}
+# can get a list of all sites and see if they are equal, and which ones aren't and then go back and look at those and what's happening.
+#need a list of test+notestnames and see how this compares to bothnames. 
+
+both_names <- unique(df_both$Unique_Id)
+
+
+test_names <- unique(df_no_test$Unique_Id)
+notest_names <- unique(df_test$Unique_Id)
+
+#combine these two lists
+
+list <- unique(test_names %in% notest_names)
+
+#there are 50 stations in both test and notest, which is weird. Could they have the same region? maybe need to try to combine by regions?
+intersect(notest_names, test_names )
+
+#looks like it's due to sample number differences! 
+#Some Unique_Ids have sample 1,2,3 with a combination of test/reference sites
+#went back and added a new column of "Unique_Id_Sample" to account for this.
 
 ```
 
@@ -217,20 +267,24 @@ geom_boxplot() +
     #theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
 scale_x_discrete(labels = wrap_format(10)) +
   ylab("Percent Sorted") +
-    scale_fill_manual(values=cbPalette)
+    scale_fill_manual(values=cbPalette) 
+  
 
 #outlier of 300... ponar sampling device ??
 #doesn't look like much difference between %sorted. 
 
 ```
 
-Graph of percent sorted, by region, without the Arctic Drainage Area outlier.
+Graph of percent sorted, by region, of reference and potential reference sites, without the Arctic Drainage Area outlier.
 ```{r}
+
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
 
 df_no_test %>% 
   filter(Subsample <= 100) %>%
   ggplot( aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
 geom_boxplot() +
+  geom_point() +
   theme_bw() +
     theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
        #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
@@ -242,18 +296,94 @@ scale_x_discrete(labels = wrap_format(10)) +
   ylab("Percent Sorted") +
     scale_fill_manual(values=cbPalette)
 
-
 ```
 
-How many measurements of % sorted are there for each region? - (ie n)
+What is our n? How many data points are there for each region for ref/pot ref sites? 
 ```{r}
 
-# run this to see n for each region
  dplyr::count(df_no_test, Region_Name, sort = TRUE) %>%
   mutate(sum(n))
 
-#why is it 5795 and not 5623? we have 172 points more...
+```
 
+Graph of percent sorted, by region, of only test sites.Looks like there are outliers
+
+```{r}
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
+
+df_test %>% 
+  #filter(Subsample <= 100) %>%
+  ggplot( aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
+geom_boxplot() +
+  theme_bw() +
+    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
+       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+   stat_boxplot(geom = "errorbar", width = 0.25) +
+  ggtitle( "Percent Sorted by Region \n(Test Sites) ") +
+  theme(legend.position = 'none') +
+    #theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
+scale_x_discrete(labels = wrap_format(10)) +
+  ylab("Percent Sorted") +
+    scale_fill_manual(values=cbPalette)
+
+#looks like there are a few outliers- graph without these
+```
+
+Graph of percent sorted, by region, of only test sites, without outliers
+
+```{r}
+
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
+
+df_test %>% 
+  filter(Subsample <= 100) %>%
+  ggplot( aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
+geom_boxplot() +
+  theme_bw() +
+    geom_point() +
+    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
+       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+   stat_boxplot(geom = "errorbar", width = 0.25) +
+  ggtitle( "Percent Sorted by Region \n(Test Sites) ") +
+  theme(legend.position = 'none') +
+    #theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
+scale_x_discrete(labels = wrap_format(10)) +
+  ylab("Percent Sorted") +
+    scale_fill_manual(values=cbPalette)
+
+```
+
+What is our n? How many sites are there for the test data?
+```{r}
+
+ dplyr::count(df_test, Region_Name, sort = TRUE) %>%
+  mutate(sum(n))
+
+```
+
+
+```{r}
+```
+
+
+##Part 2: Is there a difference between percent sorted, by longitude (E-> W)? 
+
+```{r}
+
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
+
+
+df_no_test %>%
+    filter(Subsample <= 100) %>%
+ggplot() +
+  geom_point(aes(x = Longitude, y = Subsample, colour = Region_Name) ) +
+    scale_x_continuous("Longitude") +
+  scale_y_continuous("Subsample")
+  labs(x = "Longitude", y= "Percent Sorted") +
+  ggtitle('Percent Sorted vs Longitude  \n(Reference and Potential Reference Sites)') +
+      scale_fill_manual(values=cbPalette) +
+theme(legend.position="none" ) +
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) 
 
 ```
 
@@ -261,21 +391,15 @@ How many measurements of % sorted are there for each region? - (ie n)
 ```{r}
 
 
-```
 
-
-```{r}
-```
-
-
-##Part 2: Is there a difference between the samples, by latitude? 
-
-```{r}
-
-```
-
-
-```{r}
+df_test %>%
+    filter(Subsample <= 100) %>%
+ggplot() +
+  geom_point(aes(x = Longitude, y = Subsample, colour = Region_Name) ) +
+  labs(x = "Longitude", y= "Percent Sorted") +
+  ggtitle('Percent Sorted vs Longitude  \n(Reference and Potential Reference Sites)') +
+      scale_fill_manual(values=cbPalette) +
+theme(legend.position="none") 
 
 
 ```
