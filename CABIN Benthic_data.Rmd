@@ -21,7 +21,7 @@ library(data.table)
 library(scales) 
 library(AICcmodavg)
 library(lme4)
-library(MASS)
+#library(MASS)
 ```
 
 A) Load in Benthic CABIN data in one dataframe, with a column of the Region
@@ -40,8 +40,18 @@ This has the lat/long coordinates
 
 ```{r}
 library(data.table)
-files_s <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_study.*?\\.csv", full.names = TRUE) 
-df_study <- map_df(files_s, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
+files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_study.*?\\.csv", full.names = TRUE) 
+df_study <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
+
+```
+
+
+Load in the Habitat data, with a column for each Region. 
+
+```{r}
+library(data.table)
+files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_habitat.*?\\.csv", full.names = TRUE) 
+df_habitat <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
 
 ```
 
@@ -57,7 +67,6 @@ df_benthic <- df_benthic %>%
          "Mesh_size" = "MeshSize/Maillage",
          "Subsample" =	"SubSample/Sous-échantillon",
          "Julian_day" ="JulianDay/JourJulien",
-         "Sample_Number" = "SampleNumber/Numérod'échantillon",
          "Total_sample" ="TotalSample/Échantillontotal",
          "Status" = "Status/État",
          "Taxonomist" = "Taxonomist/Taxonomiste",
@@ -78,6 +87,24 @@ df_benthic <- df_benthic %>%
 
 ```
 
+Rename to make the habitat data easier to work with. Unit, year, sample_number were renamed in excel
+
+```{r}
+
+df_habitat <- df_habitat %>%
+  rename("Site_Visit_Id" = 'SiteVisitID/IdentifiantdeVisite',
+         "Site" = "Site/Site",
+         "Julian_day" = "JulianDay/JourJulian",
+         "Status" ="status",
+         "Type" = "Type/Type",
+         "Value" = "Value/Valeur",
+         "Computed" = "Computed/Calculé",
+         "Notes" = "Note/Remarque" ) %>%
+  dplyr::select(Region, Site_Visit_Id, Site, Protocol, Julian_day, Year, Sample_Number, Status, QAQC, Type, Variable, VariableDescription, Unit, Value, MDL, Computed, Notes )
+
+```
+
+
 D) Get set up to join the benthic and study data sets.
 
 Add the region names to the benthic data using the region names file (I made this file in excel)
@@ -90,6 +117,7 @@ df_benthic <- full_join(df_benthic, Region_names, by = 'Region')
 ```
 
 Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-". This is so we have a unique id for each site visit and year.
+
 benthic data: 
 
 ```{r}
@@ -108,14 +136,24 @@ df_study_newsite <- df_study %>%
 
 ```
 
+Same for the habitat data. Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-"
+
+```{r}
+
+df_habitat_newsite <-df_habitat %>%
+tidyr::unite("Unique_Id", c("Site_Visit_Id", "Site", "Year" ), sep = "_", remove = FALSE )
+
+```
+
 Sanity check- make sure the lengths of each new id column are the same, otherwise we might be missing data
 ```{r}
 
-length(unique(df_benthic_newsite$Unique_Id))
-length(unique(df_study_newsite$Unique_Id))
+length(unique(df_benthic_newsite$Unique_Id)) #12028
+length(unique(df_study_newsite$Unique_Id)) #12464
+length(unique(df_habitat_newsite$Unique_Id)) #11591
 
-#they're not the same, 400 less sites from the benthic data
-#could be due to WQ data or other data?
+#they're not the same, 400 less sites for the benthic data
+#1000 less sites for WA/hab data. Likely techs didn't always sample benthic/hab data at every site
 
 ```
 
@@ -131,12 +169,12 @@ Region_study <- sqldf("Select * from df_study_newsite where Region Like '1' ")
 length(unique(Region_benthic$Unique_Id))
 length(unique(Region_study$Unique_Id))
 
-#Keep going, because it's likely just just due to other data sources. Going forwards make sure there are the same unique_id's for the benthic data as after the study-benthic join. (n=12028 )
+#Keep going, because it's likely just just due to other data sources. Going forwards make sure there are the same unique_id's for the data as after the study-benthic join. (benthic data n=12028 )
 
 
 ```
 
-Finally, join the study data and benthic data by the newly created Unique_Id column
+Join the study data and benthic data by the newly created Unique_Id column
 ```{r}
 
 df_both <- left_join(df_benthic_newsite, df_study_newsite,  by =  "Unique_Id") 
@@ -144,7 +182,17 @@ df_both <- left_join(df_benthic_newsite, df_study_newsite,  by =  "Unique_Id")
 length(unique(df_both$Unique_Id)) # should be n=12028 
 
 #df both has 12028, which is the same as df_benthic. Left join retained all of the benthic sites, and it looks like they all have lat/long on them.
-  
+
+
+```
+
+Join the study and benthic data set to the habitat data using the Unique_Id column
+
+```{r}
+
+df_all <- left_join(df_both, df_habitat_newsite, by = "Unique_Id" )
+
+
 ```
 
  
@@ -164,26 +212,26 @@ length(unique(df_both$Unique_Id_Sample)) #n = 13399
 Sanity checkpoint- check NAs
 ```{r}
 
-colSums(is.na(df_both_samp)) #We still have 2863 NAs in Subsample and none in Status. 
+colSums(is.na(df_both)) #We still have 2863 NAs in Subsample and none in Status. 
 
 ```
 
 More sanity checks- count number of test, potential test, and reference sites there are. These should add to 13399
 ```{r}
-#df_both = subset(df_both, select = -c(province, Province))
+df_both = subset(df_both, select = -c(province, Province))
 
 length(unique(df_both$Unique_Id_Sample)) #13399
 
 
 num_ref_sites <- sqldf( " select Status, Unique_Id_Sample
-                     from df_both_samp Where Status Like '%Refere%' 
+                     from df_both Where Status Like '%Refere%' 
                       Group by Unique_Id_Sample")
 
 
 #number of no test (ref or pot ref) sites are 5623
 
 num_test_sites <- sqldf("select Status, Unique_Id_Sample
-                         from df_both_samp where Status LIKE 'Test'
+                         from df_both where Status LIKE 'Test'
                          Group by Unique_Id_Sample")
 
 
@@ -194,7 +242,7 @@ num_test_sites <- sqldf("select Status, Unique_Id_Sample
 What Region has the NA's for Subsample?
 ```{r}
 
-Reg2 <- sqldf( " Select * from df_both_samp where Region_Name LIKE 'St. Lawrence Drainage Area'  " )
+Reg2 <- sqldf( " Select * from df_both where Region_Name LIKE 'St. Lawrence Drainage Area'  " )
 colSums(is.na(Reg2)) #all the 2863 NAs are in Region 2. 
 #consider removing Region 2 when graphing? Reg2 = St. Lawrence Drainage Area
 
@@ -210,20 +258,28 @@ Percent sorted by region. Select only the reference or potential reference sites
 df_no_test <- df_both %>%
  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Reference" | Status == "Potential Reference") %>% 
-  dplyr::select(Unique_Id_Sample, Region_Name, Subsample, Status, Latitude, Longitude) %>%
+  filter( Sampling_Device == 'Kick Net') %>%
+  filter(str_detect(Unique_Id_Sample, "_1$")) %>%
+  dplyr::select(Unique_Id_Sample, Region_Name, Subsample, Sample_Number, Sampling_Device, Status, Latitude, Longitude) %>%
   distinct() %>%
   mutate_at(c('Subsample'), as.numeric) 
+
 
 df_test <- df_both %>%
   replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Test" ) %>%
-  dplyr::select(Unique_Id_Sample, Region_Name, Subsample, Status, Latitude, Longitude) %>%
+  filter( Sampling_Device == 'Kick Net') %>%
+  filter( Sampling_Device == 'Kick Net') %>%
+  filter(str_detect(Unique_Id_Sample, "_1$")) %>%
+  dplyr::select(Unique_Id_Sample, Region_Name, Subsample,Sample_Number, Sampling_Device,Status, Latitude, Longitude) %>%
   distinct() %>%
   mutate_at(c('Subsample'), as.numeric)
 
-length(unique(df_no_test$Unique_Id_Sample)) #5889
-length(unique(df_test$Unique_Id_Sample)) #7510
-#these add to 13399
+
+length(unique(df_no_test$Unique_Id_Sample)) #4271
+length(unique(df_test$Unique_Id_Sample)) #4607
+#these add to 8878
+
 
 ```
 
@@ -252,7 +308,7 @@ intersect(notest_names, test_names )
 
 ```
 
-Graph of percent sorted, by region. It does not appear that there is a difference between percent sorted between regions, but the Arctic Drainage Area outlier could be skewing the data.
+Graph of percent sorted, by region. There could be some difference between regions
 ```{r}
 cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
 
@@ -270,33 +326,10 @@ scale_x_discrete(labels = wrap_format(10)) +
     scale_fill_manual(values=cbPalette) 
   
 
-#outlier of 300... ponar sampling device ??
-#doesn't look like much difference between %sorted. 
+
 
 ```
 
-Graph of percent sorted, by region, of reference and potential reference sites, without the Arctic Drainage Area outlier.
-```{r}
-
-cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
-
-df_no_test %>% 
-  filter(Subsample <= 100) %>%
-  ggplot( aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
-geom_boxplot() +
-  geom_point() +
-  theme_bw() +
-    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
-       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-   stat_boxplot(geom = "errorbar", width = 0.25) +
-  ggtitle( "Percent Sorted by Region \n(Potential Reference or Reference Sites) ") +
-  theme(legend.position = 'none') +
-    #theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
-scale_x_discrete(labels = wrap_format(10)) +
-  ylab("Percent Sorted") +
-    scale_fill_manual(values=cbPalette)
-
-```
 
 What is our n? How many data points are there for each region for ref/pot ref sites? 
 ```{r}
@@ -312,7 +345,7 @@ Graph of percent sorted, by region, of only test sites.Looks like there are outl
 cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
 
 df_test %>% 
-  #filter(Subsample <= 100) %>%
+  filter(Subsample <= 100) %>%
   ggplot( aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
 geom_boxplot() +
   theme_bw() +
@@ -329,29 +362,6 @@ scale_x_discrete(labels = wrap_format(10)) +
 #looks like there are a few outliers- graph without these
 ```
 
-Graph of percent sorted, by region, of only test sites, without outliers
-
-```{r}
-
-cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
-
-df_test %>% 
-  filter(Subsample <= 100) %>%
-  ggplot( aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
-geom_boxplot() +
-  theme_bw() +
-    geom_point() +
-    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
-       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-   stat_boxplot(geom = "errorbar", width = 0.25) +
-  ggtitle( "Percent Sorted by Region \n(Test Sites) ") +
-  theme(legend.position = 'none') +
-    #theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
-scale_x_discrete(labels = wrap_format(10)) +
-  ylab("Percent Sorted") +
-    scale_fill_manual(values=cbPalette)
-
-```
 
 What is our n? How many sites are there for the test data?
 ```{r}
@@ -362,28 +372,11 @@ What is our n? How many sites are there for the test data?
 ```
 
 
-```{r}
 ```
 
 
-##Part 2: Is there a difference between percent sorted, by longitude (E-> W)? 
 
 ```{r}
-
-cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
-
-
-df_no_test %>%
-    filter(Subsample <= 100) %>%
-ggplot() +
-  geom_point(aes(x = Longitude, y = Subsample, colour = Region_Name) ) +
-    scale_x_continuous("Longitude") +
-  scale_y_continuous("Subsample")
-  labs(x = "Longitude", y= "Percent Sorted") +
-  ggtitle('Percent Sorted vs Longitude  \n(Reference and Potential Reference Sites)') +
-      scale_fill_manual(values=cbPalette) +
-theme(legend.position="none" ) +
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) 
 
 ```
 
@@ -391,15 +384,6 @@ theme(legend.position="none" ) +
 ```{r}
 
 
-
-df_test %>%
-    filter(Subsample <= 100) %>%
-ggplot() +
-  geom_point(aes(x = Longitude, y = Subsample, colour = Region_Name) ) +
-  labs(x = "Longitude", y= "Percent Sorted") +
-  ggtitle('Percent Sorted vs Longitude  \n(Reference and Potential Reference Sites)') +
-      scale_fill_manual(values=cbPalette) +
-theme(legend.position="none") 
 
 
 ```
