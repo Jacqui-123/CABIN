@@ -1,9 +1,14 @@
 
-##CABIN Benthic data  -- 
+##CABIN Data Exploration
 
-Data wrangling, tidying and analysis for all regions within the Canadian Aquatic Biomonitoring Network.
+Preliminary wrangling, tidying and exploration for benthic data within all regions sampled in Canada within the Canadian Aquatic Biomonitoring Network (CABIN). 
 
-##Part 1: Is there a difference between the percent sorted of samples, by region? 
+CABIN is an aquatic biomonitoring program for freshwater ecosystems that began in 1987. Technicians sample benthic invertebrates at two different types of sites: Reference and Test sites.
+
+Reference sites represent sites without industrial, agriculture, or development activity. Test sites may or may not have similar activity, and data from the reference sites is used to assess changes to macroinvertebrate communities, water chemistry, and habitat. 
+
+Here, we graphically explore the differences between test and reference sites to see if a) we can detect a difference between these sites and b) what those differences are.
+
 
 ```{r}
 
@@ -19,12 +24,18 @@ library(mapview)
 library(gridExtra)
 library(data.table)
 library(scales) 
-library(AICcmodavg)
-library(lme4)
+library(sqldf)
+
+install.packages("hexbin")
+
+#library(lme4)
+#library(AICcmodavg)
 #library(MASS)
+
 ```
 
-A) Load in Benthic CABIN data in one dataframe, with a column of the Region
+##A) Load in the data:
+Benthic CABIN data in one dataframe, with a column of the Region
 
 ```{r}
 
@@ -34,21 +45,21 @@ df_benthic <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id 
 
 ```
 
-
 Load in Study (meta) CABIN data in one dataframe, with a column of the Region.
 This has the lat/long coordinates
 
 ```{r}
+
 library(data.table)
 files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_study.*?\\.csv", full.names = TRUE) 
 df_study <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
 
 ```
 
-
 Load in the Habitat data, with a column for each Region. 
 
 ```{r}
+
 library(data.table)
 files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_habitat.*?\\.csv", full.names = TRUE) 
 df_habitat <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
@@ -56,8 +67,9 @@ df_habitat <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id 
 ```
 
 
-B) Rename the columns to be easier to work with - just for the benthic data, I did this in excel for the study data due to the French characters misbehaving (they refused to convert to UTF-8)
+##B) Benthic Data Tidying: Rename the columns to be easier to work with. 
 ```{r}
+
 df_benthic <- df_benthic %>%
   rename("Site_Visit_ID" = 'SiteVisitID/IdentifiantdeVisite',
          "Site" = "Site/Site",
@@ -87,8 +99,69 @@ df_benthic <- df_benthic %>%
 
 ```
 
-Rename to make the habitat data easier to work with. Unit, year, sample_number were renamed in excel
+Benthic data tidying: Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-". This is so we have a unique id for each site visit and year.
 
+```{r}
+
+df_benthic <- df_benthic %>%
+  tidyr::unite("Unique_Id", c("Site_Visit_ID", "Site", "Year" ), sep = "_", remove = TRUE ) 
+
+```
+
+Benthic data tidying: Select only kick net samples, sample # = 1, and calculate the total abundance for each unique site. Individual taxa are removed for now.
+
+Note: should we exclude all mesh sizes for kick nets except for 400 microns? This was not done. 
+
+```{r}
+
+#change count column to numeric data
+df_benthic$Count = as.numeric(as.character(df_benthic$Count) )
+
+df_benthic <- df_benthic %>%
+ filter( Sampling_Device == 'Kick Net') %>%
+   filter(Sample_Number == '1') %>%
+  group_by(Unique_Id) %>%
+  mutate("Abundance" = sum(Count) ) %>%
+  #removing the individual taxa for now, just using abundance
+  select(Region, Unique_Id, Julian_day, Sampling_Device, Kick_Time, Mesh_size, Sample_Number, Subsample, Total_sample, Status, Abundance) %>%
+  distinct()
+
+```
+
+Benthic data tidying/wrangling- add the region names
+
+Load in the region names and add to the benthic data using the region names file (I made this file in excel)
+
+```{r}
+
+Region_names <- read.csv("Region_names.csv", colClasses =c("character", "character", "character")) 
+
+df_benthic <- full_join(df_benthic, Region_names, by = 'Region') 
+
+#remove file name column
+df_benthic <-df_benthic %>%
+  select(-c('File_Name', 'Region'))
+
+rm(Region_names)
+
+
+```
+
+##C)Study data tidying 
+
+(Study data columns were renamed in excel)
+Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-"
+
+```{r}
+
+df_study <- df_study %>%
+  tidyr::unite("Unique_Id", c("SiteVisitID", "Site", "Year"), sep =  "_", remove = TRUE) 
+
+```
+
+##D) Habitat data tidying 
+
+Rename to make the habitat data easier to work with. Unit, year, sample_number were renamed in excel
 ```{r}
 
 df_habitat <- df_habitat %>%
@@ -104,149 +177,110 @@ df_habitat <- df_habitat %>%
 
 ```
 
-
-D) Get set up to join the benthic and study data sets.
-
-Add the region names to the benthic data using the region names file (I made this file in excel)
-```{r}
-Region_names <- read.csv("Region_names.csv", colClasses =c("character", "character", "character")) 
-
-df_benthic <- full_join(df_benthic, Region_names, by = 'Region')
-
-
-```
-
-Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-". This is so we have a unique id for each site visit and year.
-
-benthic data: 
+Habitat data tidying-
+Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-"
 
 ```{r}
 
-df_benthic_newsite <- df_benthic %>%
-  tidyr::unite("Unique_Id", c("Site_Visit_ID", "Site", "Year" ), sep = "_", remove = FALSE )
+df_habitat <-df_habitat %>%
+tidyr::unite("Unique_Id", c("Site_Visit_Id", "Site", "Year" ), sep = "_", remove = TRUE )
 
 ```
 
-Do the same for the study data. Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-"
+Pivot habitat data so environmental/habitat variables are in columns, values in rows to enable joining to study and benthic datasets.
 
+Note: MDL, notes, and computed are not included, because they represent multiple observations per row.
+
+Note: Type == River has a protocol of "Wadeable Streams" or "Small Lakes". If we separate just by protocol we could lose some river sites. 
+
+Note: There are some NA's for protocol, double check to see if we can find out what protocol was used. They were all for older sites (see "unknown protocol" excel file)
 ```{r}
 
-df_study_newsite <- df_study %>%
-  tidyr::unite("Unique_Id", c("SiteVisitID", "Site", "Year"), sep =  "_", remove = FALSE) 
+df_habitat <- df_habitat %>%
+  #keep only first sample from triplicates
+  filter(Sample_Number == "1") %>%
+  #get rid of protocols other than wadeable streams
+  filter(Protocol == "CABIN - Wadeable Streams") %>% 
+  #ignore computed, mdl, and notes for now
+  select(-c("VariableDescription", "Notes", "Computed", "MDL")) %>%
+  tidyr::unite("Habitat Variable", c("Type", "Variable", "Unit"), sep = "_") %>%
+  pivot_wider(names_from = "Habitat Variable", values_from = "Value") 
 
 ```
 
-Same for the habitat data. Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-"
 
+Sanity check- make sure the lengths of each new id column are the same as the length of each data frame. 
 ```{r}
 
-df_habitat_newsite <-df_habitat %>%
-tidyr::unite("Unique_Id", c("Site_Visit_Id", "Site", "Year" ), sep = "_", remove = FALSE )
-
-```
-
-Sanity check- make sure the lengths of each new id column are the same, otherwise we might be missing data
-```{r}
-
-length(unique(df_benthic_newsite$Unique_Id)) #12028
-length(unique(df_study_newsite$Unique_Id)) #12464
-length(unique(df_habitat_newsite$Unique_Id)) #11591
-
-#they're not the same, 400 less sites for the benthic data
-#1000 less sites for WA/hab data. Likely techs didn't always sample benthic/hab data at every site
-
-```
-
-Sanity checks continued, checking the number of unique IDs for each region for the study and benthic data 
-```{r}
-#when I check regions 1-10 by changing "LIKE" number, unique length is different for every region. Maybe this is because there are additional habitat data or WQ observations, and this is where the difference is? There are consistently more obs for study/meta data.
-
-library(sqldf)
-
-Region_benthic <- sqldf("select * from df_benthic_newsite where Region Like '1' ")
-Region_study <- sqldf("Select * from df_study_newsite where Region Like '1' ")
-
-length(unique(Region_benthic$Unique_Id))
-length(unique(Region_study$Unique_Id))
-
-#Keep going, because it's likely just just due to other data sources. Going forwards make sure there are the same unique_id's for the data as after the study-benthic join. (benthic data n=12028 )
-
-
-```
-
-Join the study data and benthic data by the newly created Unique_Id column
-```{r}
-
-df_both <- left_join(df_benthic_newsite, df_study_newsite,  by =  "Unique_Id") 
-
-length(unique(df_both$Unique_Id)) # should be n=12028 
-
-#df both has 12028, which is the same as df_benthic. Left join retained all of the benthic sites, and it looks like they all have lat/long on them.
-
-
-```
-
-Join the study and benthic data set to the habitat data using the Unique_Id column
-
-```{r}
-
-df_all <- left_join(df_both, df_habitat_newsite, by = "Unique_Id" )
-
-
-```
-
+length(unique(df_benthic$Unique_Id)) #8878
+length(unique(df_study$Unique_Id)) #12464
+length(unique(df_habitat$Unique_Id)) #7744
  
-E) Get ready to graph.
+```
 
-Make a new column to account for the sample numbers- there are multiple sample numbers for each Unique_Id, with varying test/ref/pot ref. If we don't do this, it means that there are overlapping data points in the test and ref/pot ref graphs. 
+##E) Join all the data frames together
 
+Change df to Data.tables for quicker processing speed using the data.table vignette
 ```{r}
 
-df_both <- df_both %>%
-  tidyr::unite("Unique_Id_Sample", c("Unique_Id", "Sample_Number"), sep =  "_", remove = FALSE) 
-
-length(unique(df_both$Unique_Id_Sample)) #n = 13399
+setDT(df_benthic)
+setDT(df_study)
+setDT(df_habitat)
 
 ```
 
-Sanity checkpoint- check NAs
+
+Join the three data tables together, using the habitat data as a base, because we only want to keep benthic data with the "CABIN - wadeable streams" protocol.
+
+Note: Check on what status = 1,2,3 means for the habitat dataset. Double check that it's not necessary for delineating ref/test sites, because it was deleted from the habitat df.
+
 ```{r}
 
-colSums(is.na(df_both)) #We still have 2863 NAs in Subsample and none in Status. 
+#get rid of extraneous or double columns 
+df_benthic <- df_benthic %>%
+  select(-c("Julian_day", "Region", "Sample_Number"))
+
+df_habitat <- df_habitat %>%
+  select(-c("Status", "Sample_Number", "Region", "Julian_day"))
+
+#merge habitat and benthic data, keeping only the sites in the habitat data set
+df_both <- merge(df_habitat, df_benthic, by= "Unique_Id", all.x = TRUE)
+
+#merge benthic data, keeping only the sites in the hab/benth dataset.
+df_all <- merge(df_both, df_study, by = "Unique_Id", all.x =TRUE)
+
+#check:
+length(unique(df_all$Unique_Id)) # should be same length as df, n=7744
+
+rm(df_both)
 
 ```
 
-More sanity checks- count number of test, potential test, and reference sites there are. These should add to 13399
-```{r}
-df_both = subset(df_both, select = -c(province, Province))
+##F)Get ready to graph
 
-length(unique(df_both$Unique_Id_Sample)) #13399
+Sanity checks - count number of test, potential test, and reference sites there are. These should add to 7744
 
-
-num_ref_sites <- sqldf( " select Status, Unique_Id_Sample
-                     from df_both Where Status Like '%Refere%' 
-                      Group by Unique_Id_Sample")
-
-
-#number of no test (ref or pot ref) sites are 5623
-
-num_test_sites <- sqldf("select Status, Unique_Id_Sample
-                         from df_both where Status LIKE 'Test'
-                         Group by Unique_Id_Sample")
-
-
-#this checks out
-#number of test sites are 7510, number of ref/pot ref sites 5889. Adding them = 13399
-```
-
-What Region has the NA's for Subsample?
+Note: There are missing values for "Status" for some sites, need to decide if we can find these or if we delete these. 
 ```{r}
 
-Reg2 <- sqldf( " Select * from df_both where Region_Name LIKE 'St. Lawrence Drainage Area'  " )
-colSums(is.na(Reg2)) #all the 2863 NAs are in Region 2. 
-#consider removing Region 2 when graphing? Reg2 = St. Lawrence Drainage Area
+length(unique(df_all$Unique_Id)) #7744
+
+
+num_ref_sites <- sqldf( "select Status, Unique_Id
+                     from df_all Where Status Like '%Refere%' ") #3605
+
+
+num_test_sites <- sqldf("select Status, Unique_Id
+                         from df_all where Status LIKE 'Test' ") #3776
+
+#3605 + 3776 = 7381
+
+#colSums(is.na(df_all)) #there are 363 Nas for "Status", likely this is where the missing NAs are from.
+
+rm(num_ref_sites, num_test_sites)
 
 ```
+
 
 Continue graphing prep! 
 
@@ -254,65 +288,34 @@ First graph:
 
 Percent sorted by region. Select only the reference or potential reference sites
 ```{r}
-#change Status and Subsample NAs to "Unknown" because apparently filter automatically removes NAs.
-df_no_test <- df_both %>%
+
+df_ref <- df_all %>%
+  #changing na's this way doesn't work- likely they are listed implicitly and need to be changed to implict values (go back and do this when load in data)
+  rename("Water_Chemistry_pH" = "Water Chemistry_General-pH_pH") %>%
  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
-  filter(Status == "Reference" | Status == "Potential Reference") %>% 
-  filter( Sampling_Device == 'Kick Net') %>%
-  filter(str_detect(Unique_Id_Sample, "_1$")) %>%
-  dplyr::select(Unique_Id_Sample, Region_Name, Subsample, Sample_Number, Sampling_Device, Status, Latitude, Longitude) %>%
-  distinct() %>%
+  filter(Status == "Reference" | Status == "Potential Reference") %>%
+  #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
   mutate_at(c('Subsample'), as.numeric) 
 
 
-df_test <- df_both %>%
+df_test <- df_all %>%
+  rename("Water_Chemistry_pH" = "Water Chemistry_General-pH_pH") %>%
+  #changing na's this way doesn't work- likely they are listed implicitly and need to be changed to implict values (go back and do this when load in data)
   replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Test" ) %>%
-  filter( Sampling_Device == 'Kick Net') %>%
-  filter( Sampling_Device == 'Kick Net') %>%
-  filter(str_detect(Unique_Id_Sample, "_1$")) %>%
-  dplyr::select(Unique_Id_Sample, Region_Name, Subsample,Sample_Number, Sampling_Device,Status, Latitude, Longitude) %>%
+  #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
   distinct() %>%
   mutate_at(c('Subsample'), as.numeric)
 
 
-length(unique(df_no_test$Unique_Id_Sample)) #4271
-length(unique(df_test$Unique_Id_Sample)) #4607
-#these add to 8878
-
-
 ```
 
 
-Ignore this - this was to be able to figure out the overlapping sites in test/reference sites. Turns out it was due to sampling numbers not being accounted for. It's fixed now 
-```{r}
-# can get a list of all sites and see if they are equal, and which ones aren't and then go back and look at those and what's happening.
-#need a list of test+notestnames and see how this compares to bothnames. 
-
-both_names <- unique(df_both$Unique_Id)
-
-
-test_names <- unique(df_no_test$Unique_Id)
-notest_names <- unique(df_test$Unique_Id)
-
-#combine these two lists
-
-list <- unique(test_names %in% notest_names)
-
-#there are 50 stations in both test and notest, which is weird. Could they have the same region? maybe need to try to combine by regions?
-intersect(notest_names, test_names )
-
-#looks like it's due to sample number differences! 
-#Some Unique_Ids have sample 1,2,3 with a combination of test/reference sites
-#went back and added a new column of "Unique_Id_Sample" to account for this.
-
-```
-
-Graph of percent sorted, by region. There could be some difference between regions
+##Graph of percent sorted, by region.
 ```{r}
 cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
 
-ggplot(df_no_test, aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
+ggplot(df_ref, aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
 geom_boxplot() +
   theme_bw() +
     theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
@@ -325,21 +328,23 @@ scale_x_discrete(labels = wrap_format(10)) +
   ylab("Percent Sorted") +
     scale_fill_manual(values=cbPalette) 
   
-
-
-
 ```
 
 
 What is our n? How many data points are there for each region for ref/pot ref sites? 
+
+Note: double check why the Arctic Region is left out- likely it wasn't under the wadeable stream protocol
+
 ```{r}
 
- dplyr::count(df_no_test, Region_Name, sort = TRUE) %>%
+ dplyr::count(df_ref, Region_Name, sort = TRUE) %>%
   mutate(sum(n))
+
+#Arctic site isn't included here?
 
 ```
 
-Graph of percent sorted, by region, of only test sites.Looks like there are outliers
+##Graph of percent sorted, by region, of only test sites.
 
 ```{r}
 cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
@@ -364,41 +369,106 @@ scale_x_discrete(labels = wrap_format(10)) +
 
 
 What is our n? How many sites are there for the test data?
+
+Note: double check why the Arctic Region is left out- likely it wasn't under the wadeable stream protocol
 ```{r}
 
  dplyr::count(df_test, Region_Name, sort = TRUE) %>%
   mutate(sum(n))
+#No data for arctic region
+
+```
+
+## Graph of % sorted and abundance for Reference sites - coloured by major drainage basin
+
+```{r}
+
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
+
+
+df_ref %>%
+filter(Subsample <= 100) %>%
+ggplot(aes(x = Subsample, y = Abundance, colour = Region_Name )) +
+  geom_point(size=2) +
+    theme_bw() +
+    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
+  ggtitle( "Percent Sorted vs Abundance \n (Ref or Potential Ref Sites) ") +
+ ylab("Total Abundance (count) ") +
+ xlab("Percent Sorted") +
+scale_color_manual(values= cbPalette) +
+theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
+    theme(legend.position=c(0.8, 0.7), legend.title=element_text(size=6), legend.text=element_text(size=6)) +
+      theme(legend.title = element_text(face = "bold"))
 
 ```
 
 
+## Graph of % sorted and abundance for Test sites - coloured by major drainage basin
+
+```{r}
+
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
+
+df_test %>%
+filter(Subsample <= 100) %>%
+ggplot(aes(x = Subsample, y = Abundance, colour = Region_Name )) +
+  geom_point(size=2) +
+    theme_bw() +
+ stat_binhex() +
+    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
+  ggtitle( "Percent Sorted vs Abundance \n (Test Sites) ") +
+ ylab("Total Abundance (count) ") +
+ xlab("Percent Sorted") +
+scale_color_manual(values= cbPalette) +
+theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
+    theme(legend.position=c(0.8, 0.7), legend.title=element_text(size=6), legend.text=element_text(size=6)) +
+      theme(legend.title = element_text(face = "bold"))
+
 ```
+
+## Graph of % sorted and pH for Reference sites - coloured by major drainage basin
+
+```{r}
+
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#E69F00", "#56B4E9")
+
+df_ref %>%
+filter(Subsample <= 100) %>%
+ggplot(aes(x = Water_Chemistry_pH, y = Abundance, colour = Region_Name )) +
+  geom_point(size=2) +
+    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
+  ggtitle( "Percent Sorted vs Abundance \n (Test Sites) ") +
+scale_color_manual(values= cbPalette) +
+theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
+    theme(legend.position=c(0.8, 0.7), legend.title=element_text(size=6), legend.text=element_text(size=6)) +
+      theme(legend.title = element_text(face = "bold")) 
+
+```
+
+## Graph of % sorted and pH for Test sites - coloured by major drainage basin
+
+```{r}
+
+
+
+
+```
+
+
+## Graph of Abundance and pH for Reference sites - coloured by major drainage basin
 
 
 
 ```{r}
 
-```
 
-
-```{r}
 
 
 
 
 ```
 
-
-```{r}
-
-```
-
-```{r}
-
-
-
-```
-
+## Graph of Abundance and pH for Test sites - coloured by major drainage basin
 
 
 ```{r}
