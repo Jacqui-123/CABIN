@@ -1,17 +1,15 @@
 
-##CABIN Data Exploration
+# CABIN Data Exploration
 
 Preliminary wrangling, tidying and exploration for benthic data within all regions sampled in Canada within the Canadian Aquatic Biomonitoring Network (CABIN). 
 
-CABIN is an aquatic biomonitoring program for freshwater ecosystems that began in 1987. Technicians sample benthic invertebrates at two different types of sites: Reference and Test sites.
+CABIN is an aquatic biomonitoring program for freshwater ecosystems that began in 1987. Sites are divided in to "Reference" , or "Test" sites.
 
 Reference sites represent sites without industrial, agriculture, or development activity. Test sites may or may not have similar activity, and data from the reference sites is used to assess changes to macroinvertebrate communities, water chemistry, and habitat. 
 
-Here, we graphically explore the differences between test and reference sites to see if a) we can detect a difference between these sites and b) what those differences are.
-
+Here, we graphically explore the differences between test and reference sites to see if a) we can detect a difference in pH, macroinvertebrate abundance, and percent sorted between test and reference sites.
 
 ```{r, echo = FALSE, include = FALSE}
-
 library(png)
 library(dplyr)
 library(tidyverse)
@@ -26,34 +24,35 @@ library(data.table)
 library(scales) 
 library(sqldf)
 library(hexbin)
-
 ```
 
-##1) Load in the data
-Benthic CABIN data in one dataframe, with a column of the Region
+### 1) Load in the data
+Benthic CABIN data in one dataframe, with a column of region
 ```{r}
 library(data.table)
 files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_benthic.*?\\.csv", full.names = TRUE) 
 df_benthic <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
 ```
 
-Load in Study (meta) CABIN data in one dataframe, with a column of the Region.
-This has the lat/long coordinates
-```{r}
+-Load in Study (meta) CABIN data in one dataframe, with a column of the region.
+This has the lat/long coordinates (code not shown, see above)
+```{r, echo = FALSE, include = FALSE}
 library(data.table)
 files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_study.*?\\.csv", full.names = TRUE) 
 df_study <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
 ```
 
-Load in the Habitat data, with a column for each Region. 
-```{r}
+-Load in the Habitat data, with a column for each region. (code not shown, see above)
+```{r, echo = FALSE, include = FALSE}
 library(data.table)
 files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_habitat.*?\\.csv", full.names = TRUE) 
 df_habitat <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
 ```
 
-##2) Benthic Data Tidying 
-Rename the columns to be easier to work with. 
+### 2) Data Tidying 
+a\) Benthic Data
+
+-Rename the columns to be easier to work with. (code not shown)
 ```{r, echo = FALSE, include = FALSE}
 df_benthic <- df_benthic %>%
   rename("Site_Visit_ID" = 'SiteVisitID/IdentifiantdeVisite',
@@ -83,13 +82,13 @@ df_benthic <- df_benthic %>%
          "Valid" = "Valid/Valide")
 ```
 
-Benthic data tidying: Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-". This is so we have a unique id for each site visit and year.
+-Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-". This is so we have a unique id for each site visit and year.
 ```{r}
 df_benthic <- df_benthic %>%
   tidyr::unite("Unique_Id", c("Site_Visit_ID", "Site", "Year" ), sep = "_", remove = TRUE ) 
 ```
 
-Benthic data tidying: Select only kick net samples, sample # = 1, and calculate the total abundance for each unique site. Individual taxa are removed for now.
+-Select only kick net samples, sample # = 1, and calculate the total abundance for each unique site. Individual taxa are removed for now.
 
 **Note: should we exclude all mesh sizes for kick nets except for 400 microns? This was not done.** 
 
@@ -107,9 +106,7 @@ df_benthic <- df_benthic %>%
   select(Region, Unique_Id, Julian_day, Sampling_Device, Kick_Time, Mesh_size, Sample_Number, Subsample, Total_sample, Status, Abundance) 
 ```
 
-Benthic data tidying/wrangling- add the region names
-
-Load in the region names and add to the benthic data using the region names file (file made in excel)
+-Load in the region names and add to the benthic data using the region names file (file made in excel)
 ```{r, echo = FALSE, include = FALSE}
 Region_names <- read.csv("Region_names.csv", colClasses =c("character", "character", "character")) 
 df_benthic <- full_join(df_benthic, Region_names, by = 'Region') 
@@ -121,18 +118,21 @@ df_benthic <-df_benthic %>%
 rm(Region_names)
 ```
 
-##3)Study data tidying 
+b\) Study data tidying:
 
-(Study data columns were renamed in excel)
-Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-"
-```{r}
+-(Study data columns were renamed in excel)
+
+-Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-" (code not shown, see above)
+
+```{r, echo = FALSE, include = FALSE}
 df_study <- df_study %>%
   tidyr::unite("Unique_Id", c("SiteVisitID", "Site", "Year"), sep =  "_", remove = TRUE) 
 ```
 
-##4) Habitat data tidying 
+c\) Habitat data tidying:
 
-Rename to make the habitat data easier to work with. Unit, year, sample_number were renamed in excel
+-Rename to make the habitat data easier to work with. (code not shown)
+Unit, year, sample_number were renamed in excel 
 ```{r, echo=FALSE, include=FALSE}
 df_habitat <- df_habitat %>%
   rename("Site_Visit_Id" = 'SiteVisitID/IdentifiantdeVisite',
@@ -144,17 +144,15 @@ df_habitat <- df_habitat %>%
          "Computed" = "Computed/Calculé",
          "Notes" = "Note/Remarque" ) %>%
   dplyr::select(Region, Site_Visit_Id, Site, Protocol, Julian_day, Year, Sample_Number, Status, QAQC, Type, Variable, VariableDescription, Unit, Value, MDL, Computed, Notes )
-
 ```
 
-Habitat data tidying-
-Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-"
-```{r}
+-Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-" (code not shown, see above)
+```{r, echo= FALSE, include=FALSE}
 df_habitat <-df_habitat %>%
 tidyr::unite("Unique_Id", c("Site_Visit_Id", "Site", "Year" ), sep = "_", remove = TRUE )
 ```
 
-Pivot habitat data so environmental/habitat variables are in columns, values in rows to enable joining to study and benthic datasets.
+-Pivot habitat data so environmental/habitat variables are in columns, values in rows to enable joining to study and benthic datasets.
 
 **Note: MDL, notes, and computed are not included, because they represent multiple observations per row.**
 
@@ -174,29 +172,32 @@ df_habitat <- df_habitat %>%
   pivot_wider(names_from = "Habitat Variable", values_from = "Value") 
 ```
 
-Sanity checkpoint- make sure the lengths of each new id column are the same as the length of each data frame - they do add up. 
+-Sanity checkpoint- make sure the lengths of each new id column are the same as the length of each data frame - they add up (code not shown)
 ```{r, echo = FALSE, include=FALSE}
 
 length(unique(df_benthic$Unique_Id)) #8878
 length(unique(df_study$Unique_Id)) #12464
 length(unique(df_habitat$Unique_Id)) #7744
 ```
-##5) Join all the data frames together
+### 3) Merge data together
 
-Change df to Data.tables for quicker processing speed using the data.table vignette
+-Change df to Data.tables for quicker processing speed using the data.table vignette (code not shown)
 ```{r, echo = FALSE, include = FALSE}
 setDT(df_benthic)
 setDT(df_study)
 setDT(df_habitat)
 ```
 
-Join the three data tables together, using the habitat data as a base, because we only want to keep benthic data with the "CABIN - wadeable streams" protocol.
+-Join the three data tables together, using the habitat data as a base, because we only want to keep benthic data with the "CABIN - wadeable streams" protocol.
 
 **Note: Check on what status = 1,2,3 means for the habitat dataset. Double check that it's not necessary for delineating ref/test sites, because it was deleted from the habitat df.**
-```{r}
-#get rid of extraneous or double columns 
-df_benthic <- df_benthic %>%
-  select(-c("Julian_day", "Region", "Sample_Number"))
+
+**Note: There are missing 363 values for "Status", need to decide if we should find these or if we want to delete these. These were deleted for now** 
+
+```{r, echo = FALSE}
+#get rid of extraneous/double columns 
+#df_benthic <- df_benthic %>%
+ # select(-c("Julian_day", "Region", "Sample_Number"))
 
 df_habitat <- df_habitat %>%
   select(-c("Status", "Sample_Number", "Region", "Julian_day"))
@@ -208,18 +209,15 @@ df_both <- merge(df_habitat, df_benthic, by= "Unique_Id", all.x = TRUE)
 df_all <- merge(df_both, df_study, by = "Unique_Id", all.x =TRUE)
 
 #check:
-length(unique(df_all$Unique_Id)) # should be same length as df, n=7744
+#length(unique(df_all$Unique_Id)) # should be same length as df, n=7744
 
 rm(df_both)
 
 ```
 
-##6) Get ready to graph
+Sanity check after merging - count number of test, potential test, and reference sites there are. These should add to 7744 (they do!)
 
-Sanity checks - count number of test, potential test, and reference sites there are. These should add to 7744
-
-**Note: There are missing 363 values for "Status", need to decide if we should find these or if we want to delete these.These were deleted for now** 
-```{r, echo = FALSE}
+```{r, echo = FALSE, include=FALSE}
 
 length(unique(df_all$Unique_Id)) #7744
 
@@ -235,8 +233,10 @@ num_test_sites <- sqldf("select Status, Unique_Id
 rm(num_ref_sites, num_test_sites)
 ```
 
-Continue graphing prep! Tidy and reformat df_all to get it ready for graphing. 
-```{r}
+### 4) Get ready to graph 
+
+Tidy and reformat df_all pH data (code not shown)
+```{r, echo = FALSE, include = FALSE}
 df_all <-  df_all %>% 
   rename("Water_Chemistry_pH" = "Water Chemistry_General-pH_pH") 
 
@@ -244,10 +244,10 @@ df_all$Water_Chemistry_pH = as.numeric(as.character(df_all$Water_Chemistry_pH) )
 df_all$Water_Chemistry_pH <- round(df_all$Water_Chemistry_pH, digit = 3)
 ```
 
-Graphing prep continued: make df for test, reference, and all sites, with only the relevant columns for quicker processing
+Graphing prep: make separate data.table for test, reference, and all sites for quicker processing
 ```{r}
 df_ref <- df_all %>%
-  #changing na's this way doesn't work- likely they are listed implicitly and need to be changed to implict values (go back and do this when load in dataor address individually)
+  #changing na's this way doesn't work- likely they are listed implicitly (go back and do this when load in data or address individually)
  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Reference" | Status == "Potential Reference") %>%
   select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH ) %>%
@@ -256,8 +256,7 @@ df_ref <- df_all %>%
   distinct()
 
 df_test <- df_all %>%
-  #changing na's this way doesn't work- likely they are listed implicitly and need to be changed to implict values (go back and do this when load in data or address individually)
-  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
+#changing na's this way doesn't work- likely they are listed implicitly (go back and do this when load in data or address individually)  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Test" ) %>%
   select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH ) %>%
   #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
@@ -265,8 +264,7 @@ df_test <- df_all %>%
   distinct()
 
 df_status <- df_all %>% 
- #changing na's this way doesn't work- likely they are listed implicitly and need to be changed to implict values (go back and do this when load in data or address individually)
-  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
+#changing na's this way doesn't work- likely they are listed implicitly (go back and do this when load in data or address individually)  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Test" | Status == "Reference" | Status == "Potential Reference") %>%
   select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH ) %>%
   #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
@@ -275,10 +273,10 @@ df_status <- df_all %>%
   distinct()
 ```
 
-##7) Data exploration and graphing for percent sorted
+### 5) Graphing: Percent Sorted by reference and test sites
 
-a) Reference sites
-```{r, fig.align= 'center', echo=FALSE}
+```{r, echo=FALSE, fig.align='center'}
+#ref sites
 cbPalette <- c("#999999","#CC79A7" , "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#332288", "#D55E00", "#44AA99")
 
 ggplot(df_ref, aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
@@ -295,20 +293,8 @@ scale_x_discrete(labels = wrap_format(10)) +
     scale_fill_manual(values=cbPalette) 
 ```
 
-b) Table of N: ie how many data points are there for each region (ref/potential ref sites)? 
-
-**Note: double check why the Arctic Region is left out- likely there were not points present under the wadeable stream protocol**
-
-```{r}
- dplyr::count(df_ref, Region_Name, sort = TRUE) %>%
-  mutate(sum(n))
-
-#Arctic Region isn't included ...?
-```
-
-c) Test sites
-```{r,  fig.align= 'center', echo=FALSE}
-
+```{r, echo=FALSE, fig.align='center'}
+#c) Test sites
 df_test %>% 
   filter(Subsample <= 100) %>%
   ggplot( aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
@@ -327,20 +313,30 @@ scale_x_discrete(labels = wrap_format(10)) +
 
 ```
 
-d) Table of N: ie how many data points are there for each region (test sites)? 
+Table with # of data points for each region (ref/potential ref sites):
 
-**Note: double check why the Arctic Region is left out- likely it wasn't under the wadeable stream protocol**
-```{r}
+  **Note: double check why the Arctic Region is left out- likely there were not points present     under the wadeable stream protocol**
+
+```{r,echo=FALSE}
+ dplyr::count(df_ref, Region_Name, sort = TRUE) %>%
+  mutate(sum(n))
+
+#Arctic Region isn't included ...?
+```
+Table with # of data points for each region (test sites) 
+
+  **Note: double check why the Arctic Region is left out- likely it wasn't under the wadeable         stream protocol**
+```{r, echo = FALSE}
  dplyr::count(df_test, Region_Name, sort = TRUE) %>%
   mutate(sum(n))
-#No data for arctic region, likely no protocol = open water sites?
 ```
 
-##8) Data exploration and graphing for Abundance (macroinvert count) data
-a) boxplots, reference sites
+### 6) Graphing: Total Abundance (macroinvertebrate count) data
 
-**Note: appears that there may be outliers? These are not excluded from the scatterplots below**
-```{r,  fig.align= 'center', echo = FALSE}
+**Note: looks like there may be outliers? These are not excluded from the scatterplots below**
+```{r, echo = FALSE, fig.align='center'}
+#a) boxplots, reference sites
+
 df_ref %>% 
   filter(Subsample <= 100) %>%
   ggplot( aes(x = Region_Name, y = Abundance, fill = Region_Name )) +
@@ -350,19 +346,18 @@ geom_boxplot() +
     theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
        #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
    stat_boxplot(geom = "errorbar", width = 0.25) +
-  ggtitle( "Percent Sorted by Region \n(Reference Sites) ") +
+  ggtitle( "Percent Sorted and Abundance by Region \n(Reference Sites) ") +
   theme(legend.position = 'none') +
     #theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
 scale_x_discrete(labels = wrap_format(10)) +
-  ylab("Percent Sorted") +
+  ylab("Total Abundance (count)") +
     scale_fill_manual(values=cbPalette)
 
 ```
 
-b) boxplots, test sites
+```{r, echo = FALSE, fig.align='center'}
+#b) boxplots, test sites
 
-**Note: appears that there may be outliers? These are not excluded from the scatterplots below**
-```{r,  fig.align= 'center', echo = FALSE}
 df_test %>% 
   filter(Subsample <= 100) %>%
   ggplot( aes(x = Region_Name, y = Abundance, fill = Region_Name )) +
@@ -372,18 +367,17 @@ geom_boxplot() +
     theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
        #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
    stat_boxplot(geom = "errorbar", width = 0.25) +
-  ggtitle( "Percent Sorted by Region \n(Test Sites) ") +
+  ggtitle( "Percent Sorted and and Abundance by Region \n(Test Sites) ") +
   theme(legend.position = 'none') +
 scale_x_discrete(labels = wrap_format(10)) +
-  ylab("Percent Sorted") +
+  ylab("Total Abundance (count)") +
     scale_fill_manual(values=cbPalette)
 ```
 
 
-c) Scatterplots: Abundance vs percent sorted, by region - Reference sites
-(y=300 dotted line)
-```{r, fig.width = 4.5, fig.height= 4.5,  fig.align= 'center', echo = FALSE}
-
+```{r, fig.width = 6, fig.height= 6,    echo = FALSE, fig.align='center'}
+#c) Scatterplots: Abundance vs percent sorted, by region - Reference sites
+#(y=300 dotted line)
 df_ref %>%
   filter(Subsample <= 100) %>%
 ggplot(mapping = aes(x = Subsample, y = Abundance, colour = Region_Name) ) +
@@ -400,9 +394,10 @@ facet_wrap(~Region_Name, labeller = labeller(Region_Name = label_wrap_gen(width 
 
 ```
 
-d) Scatterplots: Abundance vs percent sorted, by region - Test sites
-(y=300 dotted line)
-```{r, fig.width = 4.5, fig.height= 4.5,  fig.align= 'center', echo = FALSE}
+
+```{r, fig.width = 6, fig.height= 6,    echo = FALSE, fig.align='center'}
+#d) Scatterplots: Abundance vs percent sorted, by region - Test sites
+#(y=300 dotted line)
 df_test %>%
   filter(Subsample <= 100) %>%
 ggplot(mapping = aes(x = Subsample, y = Abundance, colour = Region_Name) ) +
@@ -419,10 +414,10 @@ facet_wrap(~Region_Name) +
   theme(legend.position= 'none')
 ```
 
-e) Scatterplot: Abundance vs percent sorted,for all regions together
-(dotted line at y = 300)
-```{r,  fig.align= 'center', echo = FALSE}
 
+```{r,    echo = FALSE, fig.width = 5, fig.height= 5, fig.align='center'}
+#e) Scatterplot: Abundance vs percent sorted,for all regions together
+#(dotted line at y = 300)
 df_status %>%
   filter(Subsample <= 100) %>%
   mutate(Status = replace(Status, Status == "Potential Reference", "Reference" )) %>%
@@ -440,11 +435,12 @@ facet_wrap(~Status) +
 
 ```
 
-##9) Data exploration and graphing for pH data (& Percent sorted)
-a) Boxplots: Reference sites
+### 7) Graphing: pH data (& Percent sorted)
+
 **Note: ask what to do about the lower values, are all of these pH values valid?**
 
-```{r,  fig.align= 'center', echo = FALSE}
+```{r,    echo = FALSE, fig.align='center'}
+#a) Boxplots: Reference sites
 
 df_ref %>% 
   filter(Subsample <= 100) %>%
@@ -464,10 +460,10 @@ scale_x_discrete(labels = wrap_format(10)) +
 
 ```
 
-b) Boxplots: Test sites
-**Note: ask what to do about the lower values, are all of these valid?**
-(outlier pH = 14 removed, no others removed)
-```{r,  fig.align= 'center', echo = FALSE}
+
+```{r,    echo = FALSE, fig.align='center'}
+#b) Boxplots: Test sites
+#(outlier pH = 14 removed, no others removed)
 
 df_test %>% 
   filter(Subsample <= 100) %>%
@@ -487,10 +483,12 @@ scale_x_discrete(labels = wrap_format(10)) +
     scale_fill_manual(values=cbPalette)
 ```
 
-c) Scatterplots: pH vs percent sorted 
-Reference sites
-(Outliers have not been removed)
-```{r, fig.width = 4.5, fig.height= 4.5, fig.align= 'center', echo = FALSE}
+
+```{r, fig.width = 6, fig.height= 6,   echo = FALSE, fig.align='center'}
+
+#c) Scatterplots: pH vs percent sorted 
+#Reference sites
+#(Outliers have not been removed)
 df_ref %>%
 filter(Subsample <= 100) %>%
     na.omit() %>%
@@ -507,11 +505,11 @@ theme(legend.position = "None")
 
 ```
 
-d) Scatterplots: Percent sorted vs pH  
-Test sites
-(Outliers have not been removed)
-```{r, fig.width = 4.5, fig.height= 4.5, fig.align= 'center', echo = FALSE}
 
+```{r, fig.width = 6, fig.height= 6,   echo = FALSE, fig.align='center'}
+#d) Scatterplots: Percent sorted vs pH  
+#Test sites
+#(Outliers have not been removed)
 df_test %>%
 filter(Subsample <= 100) %>%
     filter(Water_Chemistry_pH <= 14) %>%
@@ -528,10 +526,10 @@ scale_color_manual(values= cbPalette) +
 theme(legend.position = "None") 
 ```
 
-e) Scatterplot: Percent sorted vs pH  -- all regions
 
-(Outliers >= pH 14 removed but no others removed)
-```{r, fig.align= 'center', echo = FALSE}
+```{r,   echo = FALSE, fig.width = 5, fig.height= 5, fig.align='center'}
+#e) Scatterplot: Percent sorted vs pH  -- all regions
+#(Outliers >= pH 14 removed but no others removed)
 
 df_status %>%
   filter(Subsample <= 100) %>%
@@ -550,9 +548,9 @@ facet_wrap(~Status) +
 
 ```
 
-##10) Data exploration and graphing for pH data (& Abundance)
-a) Reference sites 
-```{r, fig.width = 4.5, fig.height= 4.5, fig.align= 'center', echo = FALSE}
+### 8) Graphing: pH data (& Abundance)
+```{r, fig.width = 6, fig.height= 6,   echo = FALSE, fig.align='center'}
+#a) Reference sites 
 
 df_ref %>%
 filter(Subsample <= 100) %>%
@@ -570,8 +568,8 @@ theme(legend.position = "None")
 
 ```
 
-b)Test Sites
-```{r, fig.width = 4.5, fig.height= 4.5, fig.align= 'center', echo = FALSE}
+```{r, fig.width = 6, fig.height= 6,   echo = FALSE, fig.align='center'}
+#b)Test Sites
 
 df_test %>%
 filter(Subsample <= 100) %>%
@@ -590,8 +588,8 @@ theme(legend.position = "None")
 
 ```
 
-C) pH vs Abundance, all regions
-```{r, fig.align= 'center', echo = FALSE}
+```{r,   echo = FALSE, fig.width = 5, fig.height= 5, fig.align='center'}
+#C) pH vs Abundance, all regions
 
 df_status %>%
   filter(Subsample <= 100) %>%
@@ -603,7 +601,7 @@ facet_wrap(~Status) +
       theme_bw() +
   scale_colour_manual(values = c( "#CC79A7", "#44AA99" )) +
  theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
-  ggtitle( "pH vs Percent Sorted \n (Test and Refer. Sites for all regions) ") +
+  ggtitle( "pH vs Abundance \n (Test and Refer. Sites for all regions) ") +
  ylab("Abundance ") +
  xlab("pH") +
   theme(legend.position= 'none') 
