@@ -88,10 +88,7 @@ df_benthic <- df_benthic %>%
   tidyr::unite("Unique_Id", c("Site_Visit_ID", "Site", "Year" ), sep = "_", remove = TRUE ) 
 ```
 
--Select only kick net samples, sample # = 1, and calculate the total abundance for each unique site. Individual taxa are removed for now.
-
-**Note: should we exclude all mesh sizes for kick nets except for 400 microns? This was not done.** 
-
+-Select only kick net samples, sample # = 1, mesh size 400, and calculate the total abundance for each unique site. Individual taxa are removed for now. 
 ```{r}
 #change count column to numeric data
 df_benthic$Count = as.numeric(as.character(df_benthic$Count) )
@@ -99,11 +96,14 @@ df_benthic$Count <- round (df_benthic$Count, digits = 0)
 
 df_benthic <- df_benthic %>%
  filter( Sampling_Device == 'Kick Net') %>%
+  filter(Mesh_size == "400") %>%
    filter(Sample_Number == '1') %>%
   group_by(Unique_Id) %>%
   mutate("Abundance" = sum(Count) ) %>%
   #removing the individual taxa for now, just using total abundance
-  select(Region, Unique_Id, Julian_day, Sampling_Device, Kick_Time, Mesh_size, Sample_Number, Subsample, Total_sample, Status, Abundance) 
+  select(Region, Unique_Id, Julian_day, Sampling_Device, Kick_Time, Mesh_size, Sample_Number, Subsample, Total_sample, Status, Abundance) %>%
+  distinct()
+
 ```
 
 -Load in the region names and add to the benthic data using the region names file (file made in excel)
@@ -124,41 +124,57 @@ b\) Study data tidying:
 
 -Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-" (code not shown, see above)
 
+-Keep only the River site, as some are lake or wetland sites - taking a conservative approach here
+
 ```{r, echo = FALSE, include = FALSE}
+
 df_study <- df_study %>%
+   #some sites have type = lake or wetland, we want to remove these
+  filter(Type == 'River') %>%
   tidyr::unite("Unique_Id", c("SiteVisitID", "Site", "Year"), sep =  "_", remove = TRUE) 
+
 ```
 
 c\) Habitat data tidying:
 
 -Rename to make the habitat data easier to work with. (code not shown)
-Unit, year, sample_number were renamed in excel 
+Unit, year, sample_number were renamed in excel. 
 ```{r, echo=FALSE, include=FALSE}
+
+colnames(df_habitat )
 df_habitat <- df_habitat %>%
   rename("Site_Visit_Id" = 'SiteVisitID/IdentifiantdeVisite',
          "Site" = "Site/Site",
          "Julian_day" = "JulianDay/JourJulian",
-         "Status" ="status",
+         "Status" ="Status/État",
+         "Stat_Num" = "status",
          "Type" = "Type/Type",
          "Value" = "Value/Valeur",
          "Computed" = "Computed/Calculé",
          "Notes" = "Note/Remarque" ) %>%
-  dplyr::select(Region, Site_Visit_Id, Site, Protocol, Julian_day, Year, Sample_Number, Status, QAQC, Type, Variable, VariableDescription, Unit, Value, MDL, Computed, Notes )
+  mutate(Status = replace(Status, Stat_Num == "1", "Reference" ),
+         Status = replace(Status, Stat_Num =="2", "Test"),
+         Status = replace(Status, Stat_Num == "3", "Potential Reference")) %>%
+  dplyr::select(Region, Site_Visit_Id, Site, Protocol, Julian_day, Year, Sample_Number, Status, Stat_Num, QAQC, Type, Variable, VariableDescription, Unit, Value, MDL, Computed, Notes)
 ```
 
 -Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-" (code not shown, see above)
+
+-removed the 65 NAs for Protocol and Site - these are where the previous line from MDL/notes/computed continued on the next line and entered "<0.0005 mg/L" etc for site. Deleted these, but might be missing some data for these sites - 
+
+*NOTE: ask Wendy to look at habitat data region #5 spreadsheet**
 ```{r, echo= FALSE, include=FALSE}
+
 df_habitat <-df_habitat %>%
+  drop_na(Protocol)  %>%
 tidyr::unite("Unique_Id", c("Site_Visit_Id", "Site", "Year" ), sep = "_", remove = TRUE )
+
 ```
 
 -Pivot habitat data so environmental/habitat variables are in columns, values in rows to enable joining to study and benthic datasets.
 
 **Note: MDL, notes, and computed are not included, because they represent multiple observations per row.**
 
-**Note: Type == River has a protocol of "Wadeable Streams" or "Small Lakes". If we separate just by protocol we could lose some river sites - check to see if this is an issue.** 
-
-**Note: There are 65 NA's for protocol, double check to see if we can find out what protocol was used. For now, these were deleted. They were all for older sites (see "unknown protocol" excel file)**
 ```{r}
 
 df_habitat <- df_habitat %>%
@@ -170,14 +186,22 @@ df_habitat <- df_habitat %>%
   select(-c("VariableDescription", "Notes", "Computed", "MDL")) %>%
   tidyr::unite("Habitat Variable", c("Type", "Variable", "Unit"), sep = "_") %>%
   pivot_wider(names_from = "Habitat Variable", values_from = "Value") 
+
+#sum(is.na(df_habitat$Status))
+
+#sum(is.na(df_benthic$Status))
+
+#df_both[is.na(df_both$Status),]
+
 ```
 
 -Sanity checkpoint- make sure the lengths of each new id column are the same as the length of each data frame - they add up (code not shown)
 ```{r, echo = FALSE, include=FALSE}
 
-length(unique(df_benthic$Unique_Id)) #8878
-length(unique(df_study$Unique_Id)) #12464
+length(unique(df_benthic$Unique_Id)) #7056
+length(unique(df_study$Unique_Id)) #9264
 length(unique(df_habitat$Unique_Id)) #7744
+
 ```
 ### 3) Merge data together
 
@@ -188,19 +212,15 @@ setDT(df_study)
 setDT(df_habitat)
 ```
 
--Join the three data tables together, using the habitat data as a base, because we only want to keep benthic data with the "CABIN - wadeable streams" protocol.
-
-**Note: Check on what status = 1,2,3 means for the habitat dataset. Double check that it's not necessary for delineating ref/test sites, because it was deleted from the habitat df.**
-
-**Note: There are missing 363 values for "Status", need to decide if we should find these or if we want to delete these. These were deleted for now** 
+-Join the three data tables together, using the habitat data as a base, because we only want to keep benthic data with the "CABIN - Wadeable Streams" protocol.
 
 ```{r, echo = FALSE}
-#get rid of extraneous/double columns 
-#df_benthic <- df_benthic %>%
- # select(-c("Julian_day", "Region", "Sample_Number"))
 
 df_habitat <- df_habitat %>%
-  select(-c("Status", "Sample_Number", "Region", "Julian_day"))
+  select(-c("Sample_Number", "Region", "Julian_day"))
+
+df_benthic <- df_benthic %>%
+  select(-c("Status"))
 
 #merge habitat and benthic data, keeping only the sites in the habitat data set
 df_both <- merge(df_habitat, df_benthic, by= "Unique_Id", all.x = TRUE)
@@ -216,32 +236,39 @@ rm(df_both)
 ```
 
 Sanity check after merging - count number of test, potential test, and reference sites there are. These should add to 7744 (they do!)
-
 ```{r, echo = FALSE, include=FALSE}
-
 length(unique(df_all$Unique_Id)) #7744
 
 num_ref_sites <- sqldf( "select Status, Unique_Id
-                     from df_all Where Status Like '%Refere%' ") #3605
+                     from df_all Where Status Like '%Refere%' ") #3720
+
 
 num_test_sites <- sqldf("select Status, Unique_Id
-                         from df_all where Status LIKE 'Test' ") #3776
-#3605 + 3776 = 7381
+                         from df_all where Status LIKE 'Test' ") #4024
 
-#colSums(is.na(df_all)) #there are 363 Nas for "Status", likely this is where the NAs are from.
+#3720 + 4024 = 7744
+
+colSums(is.na(df_all)) #No Nas for "Status"
 
 rm(num_ref_sites, num_test_sites)
 ```
+
 
 ### 4) Get ready to graph 
 
 Tidy and reformat df_all pH data (code not shown)
 ```{r, echo = FALSE, include = FALSE}
 df_all <-  df_all %>% 
-  rename("Water_Chemistry_pH" = "Water Chemistry_General-pH_pH") 
+  rename("Water_Chemistry_pH" = "Water Chemistry_General-pH_pH",
+         "Water_Chemistry_Alkalinity" = "Water Chemistry_General-Alkalinity_mg/L")
+
 
 df_all$Water_Chemistry_pH = as.numeric(as.character(df_all$Water_Chemistry_pH) )
 df_all$Water_Chemistry_pH <- round(df_all$Water_Chemistry_pH, digit = 3)
+
+df_all$Water_Chemistry_Alkalinity = as.numeric(as.character(df_all$Water_Chemistry_Alkalinity) )
+df_all$Water_Chemistry_Alkalinity <- round(df_all$Water_Chemistry_Alkalinity, digit = 4)
+
 ```
 
 Graphing prep: make separate data.table for test, reference, and all sites for quicker processing
@@ -250,7 +277,7 @@ df_ref <- df_all %>%
   #changing na's this way doesn't work- likely they are listed implicitly (go back and do this when load in data or address individually)
  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Reference" | Status == "Potential Reference") %>%
-  select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH ) %>%
+  select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH, Water_Chemistry_Alkalinity ) %>%
   #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
   mutate_at(c('Subsample'), as.numeric) %>%
   distinct()
@@ -258,7 +285,7 @@ df_ref <- df_all %>%
 df_test <- df_all %>%
 #changing na's this way doesn't work- likely they are listed implicitly (go back and do this when load in data or address individually)  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Test" ) %>%
-  select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH ) %>%
+  select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH, Water_Chemistry_Alkalinity ) %>%
   #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
   mutate_at(c('Subsample'), as.numeric) %>%
   distinct()
@@ -271,6 +298,7 @@ df_status <- df_all %>%
   mutate_at(c("Water_Chemistry_pH"), as.numeric) %>%
   mutate_at(c('Subsample'), as.numeric) %>%
   distinct()
+
 ```
 
 ### 5) Graphing: Percent Sorted by reference and test sites
