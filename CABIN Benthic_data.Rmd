@@ -106,18 +106,6 @@ df_benthic <- df_benthic %>%
 
 ```
 
--Load in the region names and add to the benthic data using the region names file (file made in excel)
-```{r, echo = FALSE, include = FALSE}
-Region_names <- read.csv("Region_names.csv", colClasses =c("character", "character", "character")) 
-df_benthic <- full_join(df_benthic, Region_names, by = 'Region') 
-
-#remove file name column
-df_benthic <-df_benthic %>%
-  select(-c('File_Name', 'Region'))
-
-rm(Region_names)
-```
-
 b\) Study data tidying:
 
 -(Study data columns were renamed in excel)
@@ -160,22 +148,31 @@ df_habitat <- df_habitat %>%
 
 -Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-" (code not shown, see above)
 
--removed the 65 NAs for Protocol and Site - these are where the previous line from MDL/notes/computed continued on the next line and entered "<0.0005 mg/L" etc for site. Deleted these, but might be missing some data for these sites - 
-
-*NOTE: ask Wendy to look at habitat data region #5 spreadsheet**
 ```{r, echo= FALSE, include=FALSE}
+#-removed the 65 NAs for Protocol and Site - these are where the previous line from MDL/notes/computed #continued on the next line and entered "<0.0005 mg/L" etc for site. Deleted these, but might be missing #some data for these sites - 
 
+#*NOTE: ask Wendy to look at habitat data region #5 spreadsheet**
 df_habitat <-df_habitat %>%
   drop_na(Protocol)  %>%
 tidyr::unite("Unique_Id", c("Site_Visit_Id", "Site", "Year" ), sep = "_", remove = TRUE )
 
 ```
 
+-Load in the region names and add to the habitat data using the region names file (file made in excel)
+```{r, echo = FALSE, include = FALSE}
+Region_names <- read.csv("Region_names.csv", colClasses =c("character", "character", "character")) 
+df_habitat <- full_join(df_habitat, Region_names, by = 'Region') 
+
+#remove file name column
+df_habitat <- df_habitat %>%
+  select(-c('File_Name', 'Region'))
+
+rm(Region_names)
+```
+
 -Pivot habitat data so environmental/habitat variables are in columns, values in rows to enable joining to study and benthic datasets.
-
-**Note: MDL, notes, and computed are not included, because they represent multiple observations per row.**
-
 ```{r}
+#**Note: MDL, notes, and computed are not included, because they represent multiple observations per row.**
 
 df_habitat <- df_habitat %>%
   #keep only first sample from triplicates
@@ -217,10 +214,10 @@ setDT(df_habitat)
 ```{r, echo = FALSE}
 
 df_habitat <- df_habitat %>%
-  select(-c("Sample_Number", "Region", "Julian_day"))
+  select(-c("Sample_Number", "Julian_day"))
 
 df_benthic <- df_benthic %>%
-  select(-c("Status"))
+  select(-c("Status", "Region"))
 
 #merge habitat and benthic data, keeping only the sites in the habitat data set
 df_both <- merge(df_habitat, df_benthic, by= "Unique_Id", all.x = TRUE)
@@ -248,7 +245,7 @@ num_test_sites <- sqldf("select Status, Unique_Id
 
 #3720 + 4024 = 7744
 
-colSums(is.na(df_all)) #No Nas for "Status"
+#sum(is.na(df_all$Status)) #No Nas for "Status"
 
 rm(num_ref_sites, num_test_sites)
 ```
@@ -258,10 +255,12 @@ rm(num_ref_sites, num_test_sites)
 
 Tidy and reformat df_all pH data (code not shown)
 ```{r, echo = FALSE, include = FALSE}
+
 df_all <-  df_all %>% 
   rename("Water_Chemistry_pH" = "Water Chemistry_General-pH_pH",
          "Water_Chemistry_Alkalinity" = "Water Chemistry_General-Alkalinity_mg/L")
 
+setDT(df_all)
 
 df_all$Water_Chemistry_pH = as.numeric(as.character(df_all$Water_Chemistry_pH) )
 df_all$Water_Chemistry_pH <- round(df_all$Water_Chemistry_pH, digit = 3)
@@ -269,18 +268,29 @@ df_all$Water_Chemistry_pH <- round(df_all$Water_Chemistry_pH, digit = 3)
 df_all$Water_Chemistry_Alkalinity = as.numeric(as.character(df_all$Water_Chemistry_Alkalinity) )
 df_all$Water_Chemistry_Alkalinity <- round(df_all$Water_Chemistry_Alkalinity, digit = 4)
 
+df_all <- df_all %>%
+  mutate_at(c('Subsample'), as.numeric)
+
+
+#colSums(is.na(df_ref))
+
+
+#df_ref[is.na(df_ref$Abundance),]
+
+
 ```
 
 Graphing prep: make separate data.table for test, reference, and all sites for quicker processing
 ```{r}
 df_ref <- df_all %>%
   #changing na's this way doesn't work- likely they are listed implicitly (go back and do this when load in data or address individually)
- replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
+ #replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Reference" | Status == "Potential Reference") %>%
   select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH, Water_Chemistry_Alkalinity ) %>%
   #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
-  mutate_at(c('Subsample'), as.numeric) %>%
+  #mutate_at(c('Subsample'), as.numeric) %>%
   distinct()
+
 
 df_test <- df_all %>%
 #changing na's this way doesn't work- likely they are listed implicitly (go back and do this when load in data or address individually)  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
@@ -301,109 +311,54 @@ df_status <- df_all %>%
 
 ```
 
-### 5) Graphing: Percent Sorted by reference and test sites
 
-```{r, echo=FALSE, fig.align='center'}
-#ref sites
-cbPalette <- c("#999999","#CC79A7" , "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#332288", "#D55E00", "#44AA99")
-
-ggplot(df_ref, aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
+```{r, echo =  FALSE}
+#Graphing function: boxplot 
+boxplot <- function(data, x, y, fill, title, ylabtitle) {
+  
+  p <-
+    ggplot(data, aes({{x}}, {{y}}, fill = {{fill}} )) +
 geom_boxplot() +
   theme_bw() +
   geom_point() +
     theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
        #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
    stat_boxplot(geom = "errorbar", width = 0.25) +
-  ggtitle( "Percent Sorted by Region \n(Potential Reference or Reference Sites) ") +
-  theme(legend.position = 'none') +
+  ggtitle({{title}}) +
+   ylab({{ylabtitle}}) +
+ theme(legend.position = 'none') +
 scale_x_discrete(labels = wrap_format(10)) +
-  ylab("Percent Sorted") +
-    scale_fill_manual(values=cbPalette) 
-```
-
-```{r, echo=FALSE, fig.align='center'}
-#c) Test sites
-df_test %>% 
-  filter(Subsample <= 100) %>%
-  ggplot( aes(x = Region_Name, y = Subsample, fill = Region_Name )) +
-geom_boxplot() +
-    geom_point() +
-  theme_bw() +
-    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
-       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-   stat_boxplot(geom = "errorbar", width = 0.25) +
-  ggtitle( "Percent Sorted by Region \n(Test Sites) ") +
-  theme(legend.position = 'none') +
-    #theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
-scale_x_discrete(labels = wrap_format(10)) +
-  ylab("Percent Sorted") +
-    scale_fill_manual(values=cbPalette)
+  viridis::scale_fill_viridis(discrete = TRUE)
+    
+    print(p)
+}
 
 ```
 
-Table with # of data points for each region (ref/potential ref sites):
+#delete here down when done
 
-  **Note: double check why the Arctic Region is left out- likely there were not points present     under the wadeable stream protocol**
-
-```{r,echo=FALSE}
- dplyr::count(df_ref, Region_Name, sort = TRUE) %>%
-  mutate(sum(n))
-
-#Arctic Region isn't included ...?
-```
-Table with # of data points for each region (test sites) 
-
-  **Note: double check why the Arctic Region is left out- likely it wasn't under the wadeable         stream protocol**
-```{r, echo = FALSE}
- dplyr::count(df_test, Region_Name, sort = TRUE) %>%
-  mutate(sum(n))
-```
-
-### 6) Graphing: Total Abundance (macroinvertebrate count) data
-
-**Note: looks like there may be outliers? These are not excluded from the scatterplots below**
-```{r, echo = FALSE, fig.align='center'}
-#a) boxplots, reference sites
-
-df_ref %>% 
-  filter(Subsample <= 100) %>%
-  ggplot( aes(x = Region_Name, y = Abundance, fill = Region_Name )) +
-geom_boxplot() +
-    geom_point() +
-  theme_bw() +
-    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
-       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-   stat_boxplot(geom = "errorbar", width = 0.25) +
-  ggtitle( "Percent Sorted and Abundance by Region \n(Reference Sites) ") +
-  theme(legend.position = 'none') +
-    #theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid')) +
-scale_x_discrete(labels = wrap_format(10)) +
-  ylab("Total Abundance (count)") +
-    scale_fill_manual(values=cbPalette)
-
-```
-
-```{r, echo = FALSE, fig.align='center'}
-#b) boxplots, test sites
-
-df_test %>% 
-  filter(Subsample <= 100) %>%
-  ggplot( aes(x = Region_Name, y = Abundance, fill = Region_Name )) +
-geom_boxplot() +
-    geom_point() +
-  theme_bw() +
-    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
-       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-   stat_boxplot(geom = "errorbar", width = 0.25) +
-  ggtitle( "Percent Sorted and and Abundance by Region \n(Test Sites) ") +
-  theme(legend.position = 'none') +
-scale_x_discrete(labels = wrap_format(10)) +
-  ylab("Total Abundance (count)") +
-    scale_fill_manual(values=cbPalette)
-```
+```{r}
 
 
-```{r, fig.width = 6, fig.height= 6,    echo = FALSE, fig.align='center'}
+
+scatplot <- function(data, x, y, facetby, title, xlabtitle, ylabtitle) {
+  p <- ggplot(data, aes({{x}}, {{y}})) +
+  geom_point(size=2) +
+      geom_hline(yintercept = 300, linetype = "dotted") +
+    facet_wrap(enquo(facetby)) +
+        theme_bw()  +
+     theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
+ggtitle( {{title}}) +
+ xlab({{xlabtitle}}) + 
+ ylab({{ylabtitle}}) +
+  theme(legend.position= 'none') +
+      theme(legend.position= 'none') 
+  print(p)
+  }
+
+scatplot(df_ref, Subsample, Abundance, facetby = Region_Name, 1,1,1)
+
+ 
 #c) Scatterplots: Abundance vs percent sorted, by region - Reference sites
 #(y=300 dotted line)
 df_ref %>%
@@ -413,14 +368,99 @@ ggplot(mapping = aes(x = Subsample, y = Abundance, colour = Region_Name) ) +
   geom_hline(yintercept = 300, linetype = "dotted") +
 facet_wrap(~Region_Name, labeller = labeller(Region_Name = label_wrap_gen(width = 25))) +
       theme_bw() +
-  scale_colour_manual(values = c("#999999","#CC79A7" , "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#332288", "#D55E00", "#44AA99")) +
  theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
   ggtitle( "Percent Sorted vs Abundance \n (Reference/Potential Reference Sites) ") +
  ylab("Total Abundance (count) ") +
  xlab("Percent Sorted") + 
-  theme(legend.position= 'none')
+  theme(legend.position= 'none') +
+    viridis::scale_colour_viridis(discrete = TRUE)
 
 ```
+
+```{r}
+
+```
+
+
+```{r}
+
+#delete here up when done 
+```
+
+### 5) Graphing: Percent Sorted by reference and test sites
+
+```{r, echo=FALSE, fig.align='center', warning=FALSE}
+
+#b) ref sites
+boxplot(df_ref,Region_Name, Subsample, Region_Name, "Percent Sorted by Region \n(Potential Reference or Reference Sites)", "Percent Sorted" )
+
+```
+
+```{r, echo=FALSE, fig.align='center', warning= FALSE}
+
+#c) Test sites
+df_test <- df_test %>% filter(Subsample <= 100)
+boxplot(df_test,Region_Name, Subsample, Region_Name, "Percent Sorted by Region \n(Test Sites)", "Percent Sorted" )
+
+```
+
+Table with # of data points for each region (ref/potential ref sites):
+
+  **Note: double check why the Arctic Region is left out- perhaps no sites under the wadeable stream protocol?**
+
+```{r,echo=FALSE}
+ dplyr::count(df_ref, Region_Name, sort = TRUE) %>%
+  mutate(sum(n))
+
+#Arctic Region isn't included ...?
+```
+Table with # of data points for each region (test sites) 
+
+```{r, echo = FALSE}
+ dplyr::count(df_test, Region_Name, sort = TRUE) %>%
+  mutate(sum(n))
+```
+
+### 6) Graphing: Total Abundance (macroinvertebrate count) data
+
+**Note: looks like there may be outliers? These are not excluded from the scatterplots below**
+```{r, echo = FALSE, fig.align='center', warning=FALSE}
+
+#a) boxplots, reference sites
+boxplot(df_ref,Region_Name, Abundance, Region_Name, "Percent Sorted and Abundance by Region \n(Reference Sites)", 'Total Abundance (count)' )
+
+
+```
+
+```{r, echo = FALSE, fig.align='center', warning=FALSE}
+#b) boxplots, test sites
+
+boxplot(df_test,Region_Name, Abundance, Region_Name, "Percent Sorted and Abundance by Region \n(Reference Sites)", 'Total Abundance (count)' )
+
+```
+
+
+```{r, fig.width = 6, fig.height= 6,    echo = FALSE, fig.align='center'}
+
+#c) Scatterplots: Abundance vs percent sorted, by region - Reference sites
+#(y=300 dotted line)
+df_ref %>%
+  filter(Subsample <= 100) %>%
+ggplot(mapping = aes(x = Subsample, y = Abundance, colour = Region_Name) ) +
+  geom_point(size=2) + 
+  geom_hline(yintercept = 300, linetype = "dotted") +
+facet_wrap(~Region_Name, labeller = labeller(Region_Name = label_wrap_gen(width = 25))) +
+      theme_bw() +
+ theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
+  ggtitle( "Percent Sorted vs Abundance \n (Reference/Potential Reference Sites) ") +
+ ylab("Total Abundance (count) ") +
+ xlab("Percent Sorted") + 
+  theme(legend.position= 'none') +
+    viridis::scale_colour_viridis(discrete = TRUE)
+
+
+```
+
 
 
 ```{r, fig.width = 6, fig.height= 6,    echo = FALSE, fig.align='center'}
@@ -434,12 +474,13 @@ ggplot(mapping = aes(x = Subsample, y = Abundance, colour = Region_Name) ) +
 facet_wrap(~Region_Name) +
   facet_wrap(~Region_Name, labeller = labeller(Region_Name = label_wrap_gen(width = 25))) +
       theme_bw() +
-  scale_colour_manual(values = c("#999999","#CC79A7" , "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#332288", "#D55E00", "#44AA99")) +
  theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
   ggtitle( "Percent Sorted vs Abundance \n (Test Sites) ") +
  ylab("Total Abundance (count) ") +
  xlab("Percent Sorted") + 
-  theme(legend.position= 'none')
+  theme(legend.position= 'none') +
+    viridis::scale_colour_viridis(discrete = TRUE)
+
 ```
 
 
@@ -454,61 +495,31 @@ ggplot(mapping = aes(x = Subsample, y = Abundance, colour = Status) ) +
   geom_hline(yintercept = 300, linetype = "dotted") +
 facet_wrap(~Status) +
       theme_bw() +
-  scale_colour_manual(values = c("#999999","#CC79A7" , "#E69F00" )) +
  theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
   ggtitle( "Percent Sorted vs Abundance \n (Test & Reference/Potential Reference Sites) ") +
  ylab("Total Abundance (count) ") +
  xlab("Percent Sorted") +
-  theme(legend.position= 'none') 
+  theme(legend.position= 'none') +
+      viridis::scale_colour_viridis(discrete = TRUE)
+
 
 ```
 
 ### 7) Graphing: pH data (& Percent sorted)
 
-**Note: ask what to do about the lower values, are all of these pH values valid?**
-
-```{r,    echo = FALSE, fig.align='center'}
+```{r,    echo = FALSE, fig.align='center', warning=FALSE}
 #a) Boxplots: Reference sites
 
-df_ref %>% 
-  filter(Subsample <= 100) %>%
-  na.omit() %>%
-  ggplot( aes(x = Region_Name, y = Water_Chemistry_pH, fill = Region_Name )) +
-geom_boxplot() +
-    geom_point() +
-  theme_bw() +
-    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
-       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-   stat_boxplot(geom = "errorbar", width = 0.25) +
-  ggtitle( "pH by Region \n(Reference and Potential Refernce Sites) ") +
-  theme(legend.position = 'none') +
-scale_x_discrete(labels = wrap_format(10)) +
-  ylab("pH") +
-    scale_fill_manual(values=cbPalette)
+boxplot(df_ref, Region_Name, Water_Chemistry_pH, Region_Name, "pH by Region \n(Reference and Potential Reference Sites)", 'pH')
 
 ```
 
 
-```{r,    echo = FALSE, fig.align='center'}
+```{r,    echo = FALSE, fig.align='center', warning=FALSE}
 #b) Boxplots: Test sites
-#(outlier pH = 14 removed, no others removed)
-
-df_test %>% 
-  filter(Subsample <= 100) %>%
-  filter(Water_Chemistry_pH <= 14) %>%
-  na.omit() %>%
-  ggplot( aes(x = Region_Name, y = Water_Chemistry_pH, fill = Region_Name )) +
-geom_boxplot() +
-    geom_point() +
-  theme_bw() +
-    theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
-       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-   stat_boxplot(geom = "errorbar", width = 0.25) +
-  ggtitle( "pH by Region \n(Test Sites) ") +
-  theme(legend.position = 'none') +
-scale_x_discrete(labels = wrap_format(10)) +
-  ylab("pH") +
-    scale_fill_manual(values=cbPalette)
+#(outlier pH = 14 was not removed)
+df_test <- df_test %>% filter(Water_Chemistry_pH < 14)
+boxplot(df_test, Region_Name, Water_Chemistry_pH, Region_Name, "pH by Region \n(Test Sites)", 'pH')
 ```
 
 
@@ -528,9 +539,8 @@ ggplot(mapping = aes(x = Water_Chemistry_pH, y = Subsample, colour = Region_Name
   ggtitle( "pH vs Percent Sorted \n (Reference or Potential Reference Sites) ") +
  ylab("Percent Sorted") +
  xlab("pH") +
-scale_color_manual(values= cbPalette) +
-theme(legend.position = "None") 
-
+theme(legend.position = "None") +
+        viridis::scale_colour_viridis(discrete = TRUE)
 ```
 
 
@@ -550,8 +560,9 @@ ggplot(mapping = aes(x = Water_Chemistry_pH, y = Subsample, colour = Region_Name
   ggtitle( "pH vs Percent Sorted \n (Test Sites) ") +
  ylab("Percent Sorted") +
  xlab("pH") +
-scale_color_manual(values= cbPalette) +
-theme(legend.position = "None") 
+theme(legend.position = "None") +
+        viridis::scale_colour_viridis(discrete = TRUE)
+
 ```
 
 
@@ -567,12 +578,13 @@ ggplot(mapping = aes(x = Water_Chemistry_pH, y = Subsample, colour = Status) ) +
   geom_point(size=3, alpha = 0.3) + 
 facet_wrap(~Status) +
       theme_bw() +
-  scale_colour_manual(values = c( "#009E73", "#0072B2" )) +
  theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
   ggtitle( "pH vs Percent Sorted \n (Test and Refer. Sites for all regions) ") +
  ylab("Percent Sorted ") +
  xlab("pH") +
-  theme(legend.position= 'none') 
+  theme(legend.position= 'none') +
+        viridis::scale_colour_viridis(discrete = TRUE)
+
 
 ```
 
@@ -591,8 +603,9 @@ ggplot(mapping = aes(x = Water_Chemistry_pH, y = Abundance, colour = Region_Name
   ggtitle( "pH vs Abundance \n (Reference or Potential Reference Sites) ") +
  ylab("Abundance") +
  xlab("pH") +
-scale_color_manual(values= cbPalette) +
-theme(legend.position = "None") 
+theme(legend.position = "None") +
+          viridis::scale_colour_viridis(discrete = TRUE)
+
 
 ```
 
@@ -611,8 +624,9 @@ ggplot(mapping = aes(x = Water_Chemistry_pH, y = Abundance, colour = Region_Name
   ggtitle( "pH vs Abundance \n (Test Sites) ") +
  ylab("Abundance") +
  xlab("pH") +
-scale_color_manual(values= cbPalette) +
-theme(legend.position = "None") 
+theme(legend.position = "None") +
+          viridis::scale_colour_viridis(discrete = TRUE)
+
 
 ```
 
@@ -627,12 +641,62 @@ ggplot(mapping = aes(x = Water_Chemistry_pH, y = Abundance, colour = Status) ) +
   geom_point(size=3, alpha = 0.3) + 
 facet_wrap(~Status) +
       theme_bw() +
-  scale_colour_manual(values = c( "#CC79A7", "#44AA99" )) +
  theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
   ggtitle( "pH vs Abundance \n (Test and Refer. Sites for all regions) ") +
  ylab("Abundance ") +
  xlab("pH") +
-  theme(legend.position= 'none') 
+  theme(legend.position= 'none') +
+            viridis::scale_colour_viridis(discrete = TRUE)
+
+
+```
+
+```{r, echo = FALSE, include = FALSE}
+#cbPalette <- c("#999999","#CC79A7" , "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#332288", "#D55E00", "#44AA99")
+  #  scale_fill_manual(values=cbPalette)
+  #scale_colour_manual(values = c("#999999","#CC79A7" , "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#332288", "#D55E00", "#44AA99")) +
+
+
+
+### Trying to get scatterplots into a function.... 
+
+#scatplot <- function(data, x, y, facetby, title, xlabtitle, ylabtitle) {
+ # p <- ggplot(data, aes({{x}}, {{y}})) +
+#  geom_point(size=2) +
+ #     geom_hline(yintercept = 300, linetype = "dotted") +
+  #  facet_wrap(enquo(facetby)) +
+   #     theme_bw()  +
+    # theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
+#ggtitle( {{title}}) +
+# xlab({{xlabtitle}}) + 
+ #ylab({{ylabtitle}}) +
+ # theme(legend.position= 'none') +
+  #    theme(legend.position= 'none') +   
+#viridis::scale_colour_viridis(discrete = TRUE)
+
+ # print(p)
+#  }
+
+#scatplot(df_ref, Subsample, Abundance, facetby = Region_Name, 1,1,1)
+
+ 
+#c) Scatterplots: Abundance vs percent sorted, by region - Reference sites
+#(y=300 dotted line)
+#df_ref %>%
+#  filter(Subsample <= 100) %>%
+#ggplot(mapping = aes(x = Subsample, y = Abundance, colour = Region_Name) ) +
+##  geom_point(size=2) + 
+#  geom_hline(yintercept = 300, linetype = "dotted") +
+#facet_wrap(~Region_Name, labeller = labeller(Region_Name = label_wrap_gen(width = 25))) +
+#      theme_bw() +
+# theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
+#  ggtitle( "Percent Sorted vs Abundance \n (Reference/Potential Reference Sites) ") +
+# ylab("Total Abundance (count) ") +
+# xlab("Percent Sorted") + 
+ # theme(legend.position= 'none') +
+   # viridis::scale_colour_viridis(discrete = TRUE)
+
+
 
 ```
 
