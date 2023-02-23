@@ -112,7 +112,7 @@ b\) Study data tidying:
 
 -Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-" (code not shown, see above)
 
--Keep only the River site, as some are lake or wetland sites - taking a conservative approach here
+-Keep only the "River" sites, as some are lake or wetland sites. We are taking a conservative approach here
 
 ```{r, echo = FALSE, include = FALSE}
 
@@ -151,7 +151,7 @@ df_habitat <- df_habitat %>%
 ```{r, echo= FALSE, include=FALSE}
 #-removed the 65 NAs for Protocol and Site - these are where the previous line from MDL/notes/computed #continued on the next line and entered "<0.0005 mg/L" etc for site. Deleted these, but might be missing #some data for these sites - 
 
-#*NOTE: ask Wendy to look at habitat data region #5 spreadsheet**
+#*NOTE: can delete valus from hab #5 spreadsheet with all the weird values for site - we confirmed that it doesn't delete data.**
 df_habitat <-df_habitat %>%
   drop_na(Protocol)  %>%
 tidyr::unite("Unique_Id", c("Site_Visit_Id", "Site", "Year" ), sep = "_", remove = TRUE )
@@ -170,25 +170,26 @@ df_habitat <- df_habitat %>%
 rm(Region_names)
 ```
 
--Pivot habitat data so environmental/habitat variables are in columns, values in rows to enable joining to study and benthic datasets.
+-Pivot habitat data so the variables are in columns and the values in rows to enable joining to study and benthic datasets.
+
 ```{r}
-#**Note: MDL, notes, and computed are not included, because they represent multiple observations per row.**
 
 df_habitat <- df_habitat %>%
-  #keep only first sample from triplicates
+#keep only first sample from triplicates
   filter(Sample_Number == "1") %>%
   #get rid of protocols other than wadeable streams
   filter(Protocol == "CABIN - Wadeable Streams") %>% 
-  #ignore computed, mdl, and notes for now
-  select(-c("VariableDescription", "Notes", "Computed", "MDL")) %>%
-  tidyr::unite("Habitat Variable", c("Type", "Variable", "Unit"), sep = "_") %>%
-  pivot_wider(names_from = "Habitat Variable", values_from = "Value") 
-
-#sum(is.na(df_habitat$Status))
-
-#sum(is.na(df_benthic$Status))
-
-#df_both[is.na(df_both$Status),]
+  #keep only alkalinity and pH data
+  filter(Variable == "General-Alkalinity" | Variable == "General-pH")  %>%
+  filter(Type == "Water Chemistry")%>%
+  #Value needs to be as.numeric or pivot won't work. 
+  mutate_at(c('Value'), as.numeric) %>%
+  #unite so have units of measurement in column name as well when pivot
+  tidyr::unite("Habitat Variable", c("Variable", "Unit"), sep = "_") %>%
+  select(-c("Computed", "MDL", "VariableDescription")) %>%
+  #pivot, preserving multiple columns (value, notes, computed)
+  pivot_wider(names_from = "Habitat Variable", values_from = c("Value", "Notes", "Computed") ) %>%
+ distinct()
 
 ```
 
@@ -280,11 +281,9 @@ df_all <- df_all %>%
 
 ```
 
-Graphing prep: make separate data.table for test, reference, and all sites for quicker processing
-```{r}
+-Graphing prep: make separate data.table for test, reference, and all sites for quicker processing
+```{r, echo= FALSE, include = FALSE}
 df_ref <- df_all %>%
-  #changing na's this way doesn't work- likely they are listed implicitly (go back and do this when load in data or address individually)
- #replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Reference" | Status == "Potential Reference") %>%
   select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH, Water_Chemistry_Alkalinity ) %>%
   #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
@@ -293,7 +292,6 @@ df_ref <- df_all %>%
 
 
 df_test <- df_all %>%
-#changing na's this way doesn't work- likely they are listed implicitly (go back and do this when load in data or address individually)  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Test" ) %>%
   select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH, Water_Chemistry_Alkalinity ) %>%
   #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
@@ -301,7 +299,6 @@ df_test <- df_all %>%
   distinct()
 
 df_status <- df_all %>% 
-#changing na's this way doesn't work- likely they are listed implicitly (go back and do this when load in data or address individually)  replace_na(list(Status = "Unknown", Subsample = "Unknown")) %>% 
   filter(Status == "Test" | Status == "Reference" | Status == "Potential Reference") %>%
   select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH ) %>%
   #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
@@ -311,11 +308,10 @@ df_status <- df_all %>%
 
 ```
 
-
-```{r, echo =  FALSE}
+-Make graphing functions (boxplot code shown)
+```{r}
 #Graphing function: boxplot 
 boxplot <- function(data, x, y, fill, title, ylabtitle) {
-  
   p <-
     ggplot(data, aes({{x}}, {{y}}, fill = {{fill}} )) +
 geom_boxplot() +
@@ -335,57 +331,6 @@ scale_x_discrete(labels = wrap_format(10)) +
 
 ```
 
-#delete here down when done
-
-```{r}
-
-
-
-scatplot <- function(data, x, y, facetby, title, xlabtitle, ylabtitle) {
-  p <- ggplot(data, aes({{x}}, {{y}})) +
-  geom_point(size=2) +
-      geom_hline(yintercept = 300, linetype = "dotted") +
-    facet_wrap(enquo(facetby)) +
-        theme_bw()  +
-     theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
-ggtitle( {{title}}) +
- xlab({{xlabtitle}}) + 
- ylab({{ylabtitle}}) +
-  theme(legend.position= 'none') +
-      theme(legend.position= 'none') 
-  print(p)
-  }
-
-scatplot(df_ref, Subsample, Abundance, facetby = Region_Name, 1,1,1)
-
- 
-#c) Scatterplots: Abundance vs percent sorted, by region - Reference sites
-#(y=300 dotted line)
-df_ref %>%
-  filter(Subsample <= 100) %>%
-ggplot(mapping = aes(x = Subsample, y = Abundance, colour = Region_Name) ) +
-  geom_point(size=2) + 
-  geom_hline(yintercept = 300, linetype = "dotted") +
-facet_wrap(~Region_Name, labeller = labeller(Region_Name = label_wrap_gen(width = 25))) +
-      theme_bw() +
- theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
-  ggtitle( "Percent Sorted vs Abundance \n (Reference/Potential Reference Sites) ") +
- ylab("Total Abundance (count) ") +
- xlab("Percent Sorted") + 
-  theme(legend.position= 'none') +
-    viridis::scale_colour_viridis(discrete = TRUE)
-
-```
-
-```{r}
-
-```
-
-
-```{r}
-
-#delete here up when done 
-```
 
 ### 5) Graphing: Percent Sorted by reference and test sites
 
@@ -648,10 +593,34 @@ facet_wrap(~Status) +
   theme(legend.position= 'none') +
             viridis::scale_colour_viridis(discrete = TRUE)
 
-
 ```
 
+### 9) Graphing: Alkalinity data (& Abundance & Subsample)
+
+```{r}
+
+Make a note that no values below the minimum detectable limit were deleted. These are flagged in the notes column, etc. Maybe say how many values there are, and the range. 
+
+
+MDL unique notes examples: 
+#Data was converted from '<20.0' to '10', Data below the MDL was entered into CABIN as 1/2 the MDL --> means they entered 10.
+
+#Data was converted from '<10' to '5', Data below the MDL was entered into CABIN as 1/2 the MDL --> means they entered 5
+
+#Issue: there are multiple MDL's 
+#sometimes MDL is listed, sometimes it's not- 
+
+#sometimes data just has a "low quantification limit", and we see values close to 0.
+
+#solution: just flag them. Most of them are below 10 which is all basically the same in terms of buffering capacity
+  
+```
+
+
+
 ```{r, echo = FALSE, include = FALSE}
+
+#ignore, this is old code 
 #cbPalette <- c("#999999","#CC79A7" , "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#332288", "#D55E00", "#44AA99")
   #  scale_fill_manual(values=cbPalette)
   #scale_colour_manual(values = c("#999999","#CC79A7" , "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#332288", "#D55E00", "#44AA99")) +
@@ -696,6 +665,17 @@ facet_wrap(~Status) +
  # theme(legend.position= 'none') +
    # viridis::scale_colour_viridis(discrete = TRUE)
 
+
+
+```
+
+```{r, echo = FALSE, include = FALSE}
+
+#sum(is.na(df_habitat$Status))
+
+#sum(is.na(df_benthic$Status))
+
+#df_both[is.na(df_both$Status),]
 
 
 ```
