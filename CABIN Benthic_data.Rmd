@@ -85,7 +85,8 @@ df_benthic <- df_benthic %>%
 -Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-". This is so we have a unique id for each site visit and year.
 ```{r}
 df_benthic <- df_benthic %>%
-  tidyr::unite("Unique_Id", c("Site_Visit_ID", "Site", "Year" ), sep = "_", remove = TRUE ) 
+  tidyr::unite("Unique_Id", c("Site_Visit_ID", "Site", "Year" ), sep = "_", remove = TRUE) 
+
 ```
 
 -Select only kick net samples, sample # = 1, mesh size 400, and calculate the total abundance for each unique site. Individual taxa are removed for now. 
@@ -95,14 +96,14 @@ df_benthic$Count = as.numeric(as.character(df_benthic$Count) )
 df_benthic$Count <- round (df_benthic$Count, digits = 0)
 
 df_benthic <- df_benthic %>%
- filter( Sampling_Device == 'Kick Net') %>%
-  filter(Mesh_size == "400") %>%
+ #filter(Sampling_Device == 'Kick Net') %>%
+  #filter(Mesh_size == "400") %>%
    filter(Sample_Number == '1') %>%
   group_by(Unique_Id) %>%
   mutate("Abundance" = sum(Count) ) %>%
   #removing the individual taxa for now, just using total abundance
-  select(Region, Unique_Id, Julian_day, Sampling_Device, Kick_Time, Mesh_size, Sample_Number, Subsample, Total_sample, Status, Abundance) %>%
-  distinct()
+  select(Region, Unique_Id, Julian_day, Sampling_Device, Sample_Number, Kick_Time, Mesh_size, Sample_Number, Subsample, Total_sample, Status, Abundance) %>%
+ distinct()
 
 ```
 
@@ -118,7 +119,7 @@ b\) Study data tidying:
 
 df_study <- df_study %>%
    #some sites have type = lake or wetland, we want to remove these
-  filter(Type == 'River') %>%
+  #filter(Type == 'River') %>%
   tidyr::unite("Unique_Id", c("SiteVisitID", "Site", "Year"), sep =  "_", remove = TRUE) 
 
 ```
@@ -129,7 +130,6 @@ c\) Habitat data tidying:
 Unit, year, sample_number were renamed in excel. 
 ```{r, echo=FALSE, include=FALSE}
 
-colnames(df_habitat )
 df_habitat <- df_habitat %>%
   rename("Site_Visit_Id" = 'SiteVisitID/IdentifiantdeVisite',
          "Site" = "Site/Site",
@@ -153,24 +153,12 @@ df_habitat <- df_habitat %>%
 
 #*NOTE: can delete valus from hab #5 spreadsheet with all the weird values for site - we confirmed that it doesn't delete data.**
 df_habitat <-df_habitat %>%
-  drop_na(Protocol)  %>%
+  #drop_na(Protocol)  %>%
 tidyr::unite("Unique_Id", c("Site_Visit_Id", "Site", "Year" ), sep = "_", remove = TRUE )
 
 ```
 
--Load in the region names and add to the habitat data using the region names file (file made in excel)
-```{r, echo = FALSE, include = FALSE}
-Region_names <- read.csv("Region_names.csv", colClasses =c("character", "character", "character")) 
-df_habitat <- full_join(df_habitat, Region_names, by = 'Region') 
-
-#remove file name column
-df_habitat <- df_habitat %>%
-  select(-c('File_Name', 'Region'))
-
-rm(Region_names)
-```
-
--Pivot habitat data so the variables are in columns and the values in rows to enable joining to study and benthic datasets.
+-Pivot habitat data so the variables are in columns and the values in rows 
 
 ```{r}
 
@@ -178,7 +166,7 @@ df_habitat <- df_habitat %>%
 #keep only first sample from triplicates
   filter(Sample_Number == "1") %>%
   #get rid of protocols other than wadeable streams
-  filter(Protocol == "CABIN - Wadeable Streams") %>% 
+  #filter(Protocol == "CABIN - Wadeable Streams") %>% 
   #keep only alkalinity and pH data
   filter(Variable == "General-Alkalinity" | Variable == "General-pH")  %>%
   filter(Type == "Water Chemistry")%>%
@@ -186,21 +174,15 @@ df_habitat <- df_habitat %>%
   mutate_at(c('Value'), as.numeric) %>%
   #unite so have units of measurement in column name as well when pivot
   tidyr::unite("Habitat Variable", c("Variable", "Unit"), sep = "_") %>%
-  select(-c("Computed", "MDL", "VariableDescription")) %>%
+  select(-c( "MDL", "VariableDescription")) %>%
   #pivot, preserving multiple columns (value, notes, computed)
   pivot_wider(names_from = "Habitat Variable", values_from = c("Value", "Notes", "Computed") ) %>%
- distinct()
+  rename("pH" = "Value_General-pH_pH",
+         "Alkalinity" = "Value_General-Alkalinity_mg/L") %>%
+    distinct()
 
 ```
 
--Sanity checkpoint- make sure the lengths of each new id column are the same as the length of each data frame - they add up (code not shown)
-```{r, echo = FALSE, include=FALSE}
-
-length(unique(df_benthic$Unique_Id)) #7056
-length(unique(df_study$Unique_Id)) #9264
-length(unique(df_habitat$Unique_Id)) #7744
-
-```
 ### 3) Merge data together
 
 -Change df to Data.tables for quicker processing speed using the data.table vignette (code not shown)
@@ -210,99 +192,127 @@ setDT(df_study)
 setDT(df_habitat)
 ```
 
--Join the three data tables together, using the habitat data as a base, because we only want to keep benthic data with the "CABIN - Wadeable Streams" protocol.
+-Join the three data tables together. 
 
 ```{r, echo = FALSE}
 
-df_habitat <- df_habitat %>%
-  select(-c("Sample_Number", "Julian_day"))
+#merge benthic and habitat data, keeping everything: 
 
-df_benthic <- df_benthic %>%
-  select(-c("Status", "Region"))
+df_both<- merge(df_habitat, df_benthic, by = "Unique_Id", all = TRUE)
 
-#merge habitat and benthic data, keeping only the sites in the habitat data set
-df_both <- merge(df_habitat, df_benthic, by= "Unique_Id", all.x = TRUE)
+#merge df_both and the study data - left join to keep only the df_both (hab + benth) sites, as study data doesn't have any new variables of interest.  
 
-#merge benthic data, keeping only the sites in the hab/benth dataset.
-df_all <- merge(df_both, df_study, by = "Unique_Id", all.x =TRUE)
+df_all <- merge(df_both, df_study, by = "Unique_Id", all.x = TRUE)
 
-#check:
-#length(unique(df_all$Unique_Id)) # should be same length as df, n=7744
-
-rm(df_both)
+length(unique(df_all$Unique_Id)) #12408
 
 ```
 
-Sanity check after merging - count number of test, potential test, and reference sites there are. These should add to 7744 (they do!)
+
+Tidy the joined df to get rid of lake/wetland/non wadeable stream sites 
+
+```{r, echo = FALSE}
+
+#tidy to get rid of wetlands, lakes, etc- make sure to keep NAs
+df_all <- df_all %>%
+  filter(is.na(Protocol) | Protocol == "CABIN - Wadeable Streams") %>%
+  filter(is.na(Sampling_Device) | Sampling_Device == "Kick Net") %>%
+  #note: we are keeping
+  filter(is.na(Type.y) | Type.y  == "River") %>%
+  filter(is.na(Mesh_size) | Mesh_size == "400") %>%
+  mutate(Status = coalesce(Status.x, Status.y)) %>%
+  mutate(Region = coalesce(Region.x, Region.y)) 
+
+```
+
+**Note: many sites don't have Protocol listed at all. For those, I kept them if "Type" == River. Should double check that these are actually streams.There are ~1375, mostly Arctic. 
+
+-Here is a DF of those sites: 
+
+```{r}
+
+Protocol_Nas <- df_all[is.na(df_all$Protocol),]
+
+#write.csv(". )
+```
+
+Sanity check after merging - count number of test, potential test, and reference sites there are. These should add to 7058 (they do!) and there should be no NAs for Status column
+
 ```{r, echo = FALSE, include=FALSE}
-length(unique(df_all$Unique_Id)) #7744
+
+length(unique(df_all$Unique_Id)) #7058
 
 num_ref_sites <- sqldf( "select Status, Unique_Id
-                     from df_all Where Status Like '%Refere%' ") #3720
+                     from df_all Where Status Like '%Refere%' ") #3455
 
 
 num_test_sites <- sqldf("select Status, Unique_Id
-                         from df_all where Status LIKE 'Test' ") #4024
+                         from df_all where Status LIKE 'Test' ") #3603
 
-#3720 + 4024 = 7744
+#3455 + 3603 = 7058
 
-#sum(is.na(df_all$Status)) #No Nas for "Status"
+#sum(is.na(df_all$Status)) #Check that there are No Nas for "Status"
 
 rm(num_ref_sites, num_test_sites)
 ```
 
+-Load in the region names and add to the merged dfs using the region names file (file made in excel)
+
+```{r, echo = FALSE, include = FALSE}
+
+
+Region_names <- read.csv("Region_names.csv", colClasses =c("character", "character", "character")) 
+df_all <- full_join(df_all, Region_names, by = 'Region') 
+
+df_all <- df_all %>%
+  select(-c(File_Name))
+
+rm(Region_names)
+
+#sum(is.na(df_all$Region_Name)) #should be no NAs for Region_Name
+    
+```
 
 ### 4) Get ready to graph 
 
 Tidy and reformat df_all pH data (code not shown)
 ```{r, echo = FALSE, include = FALSE}
 
-df_all <-  df_all %>% 
-  rename("Water_Chemistry_pH" = "Water Chemistry_General-pH_pH",
-         "Water_Chemistry_Alkalinity" = "Water Chemistry_General-Alkalinity_mg/L")
-
 setDT(df_all)
 
-df_all$Water_Chemistry_pH = as.numeric(as.character(df_all$Water_Chemistry_pH) )
-df_all$Water_Chemistry_pH <- round(df_all$Water_Chemistry_pH, digit = 3)
+df_all$`pH` = as.numeric(as.character(df_all$`pH`) )
+df_all$`pH` <- round(df_all$`pH`, digit = 3)
 
-df_all$Water_Chemistry_Alkalinity = as.numeric(as.character(df_all$Water_Chemistry_Alkalinity) )
-df_all$Water_Chemistry_Alkalinity <- round(df_all$Water_Chemistry_Alkalinity, digit = 4)
+df_all$`Alkalinity` = as.numeric(as.character(df_all$`Alkalinity`) )
+df_all$`Alkalinity` <- round(df_all$`Alkalinity`, digit = 4)
 
 df_all <- df_all %>%
   mutate_at(c('Subsample'), as.numeric)
-
-
-#colSums(is.na(df_ref))
-
-
-#df_ref[is.na(df_ref$Abundance),]
-
 
 ```
 
 -Graphing prep: make separate data.table for test, reference, and all sites for quicker processing
 ```{r, echo= FALSE, include = FALSE}
+
 df_ref <- df_all %>%
   filter(Status == "Reference" | Status == "Potential Reference") %>%
-  select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH, Water_Chemistry_Alkalinity ) %>%
+  select(Unique_Id, Region_Name, Protocol, Type.y, Status, Abundance, Subsample, pH, Alkalinity ) %>%
   #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
-  #mutate_at(c('Subsample'), as.numeric) %>%
+  mutate_at(c('Subsample'), as.numeric) %>%
   distinct()
-
 
 df_test <- df_all %>%
   filter(Status == "Test" ) %>%
-  select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH, Water_Chemistry_Alkalinity ) %>%
+  select(Unique_Id, Region_Name, Protocol, Type.y, Status, Abundance, Subsample, pH, Alkalinity ) %>%
   #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
   mutate_at(c('Subsample'), as.numeric) %>%
   distinct()
 
 df_status <- df_all %>% 
   filter(Status == "Test" | Status == "Reference" | Status == "Potential Reference") %>%
-  select(Unique_Id, Region_Name, Protocol, Status, Abundance, Subsample, Water_Chemistry_pH ) %>%
+  select(Unique_Id, Region_Name, Protocol,Type.y, Status, Abundance, Subsample, pH, Alkalinity ) %>%
   #filter(str_detect(Unique_Id_Sample, "_1$")) %>%
-  mutate_at(c("Water_Chemistry_pH"), as.numeric) %>%
+  mutate_at(c("pH"), as.numeric) %>%
   mutate_at(c('Subsample'), as.numeric) %>%
   distinct()
 
@@ -348,6 +358,21 @@ df_test <- df_test %>% filter(Subsample <= 100)
 boxplot(df_test,Region_Name, Subsample, Region_Name, "Percent Sorted by Region \n(Test Sites)", "Percent Sorted" )
 
 ```
+```{r}
+#calculate how many sites for test and reference 
+
+x = sum(is.na(df_ref$Abundance))
+y = length(unique(df_ref$Unique_Id) )
+
+m = sum(is.na(df_test$Abundance))
+n = length(unique(df_test$Unique_Id) )
+
+as.numeric(c(x,y, m,n))
+
+y-x
+
+n-m
+```
 
 Table with # of data points for each region (ref/potential ref sites):
 
@@ -358,6 +383,7 @@ Table with # of data points for each region (ref/potential ref sites):
   mutate(sum(n))
 
 #Arctic Region isn't included ...?
+
 ```
 Table with # of data points for each region (test sites) 
 
@@ -373,7 +399,6 @@ Table with # of data points for each region (test sites)
 
 #a) boxplots, reference sites
 boxplot(df_ref,Region_Name, Abundance, Region_Name, "Percent Sorted and Abundance by Region \n(Reference Sites)", 'Total Abundance (count)' )
-
 
 ```
 
@@ -455,7 +480,7 @@ facet_wrap(~Status) +
 ```{r,    echo = FALSE, fig.align='center', warning=FALSE}
 #a) Boxplots: Reference sites
 
-boxplot(df_ref, Region_Name, Water_Chemistry_pH, Region_Name, "pH by Region \n(Reference and Potential Reference Sites)", 'pH')
+boxplot(df_ref, Region_Name, pH, Region_Name, "pH by Region \n(Reference and Potential Reference Sites)", 'pH')
 
 ```
 
@@ -463,8 +488,8 @@ boxplot(df_ref, Region_Name, Water_Chemistry_pH, Region_Name, "pH by Region \n(R
 ```{r,    echo = FALSE, fig.align='center', warning=FALSE}
 #b) Boxplots: Test sites
 #(outlier pH = 14 was not removed)
-df_test <- df_test %>% filter(Water_Chemistry_pH < 14)
-boxplot(df_test, Region_Name, Water_Chemistry_pH, Region_Name, "pH by Region \n(Test Sites)", 'pH')
+df_test <- df_test %>% filter(pH < 14)
+boxplot(df_test, Region_Name, pH, Region_Name, "pH by Region \n(Test Sites)", 'pH')
 ```
 
 
@@ -476,7 +501,7 @@ boxplot(df_test, Region_Name, Water_Chemistry_pH, Region_Name, "pH by Region \n(
 df_ref %>%
 filter(Subsample <= 100) %>%
     na.omit() %>%
-ggplot(mapping = aes(x = Water_Chemistry_pH, y = Subsample, colour = Region_Name )) +
+ggplot(mapping = aes(x = pH, y = Subsample, colour = Region_Name )) +
   geom_point(size=2) +
   facet_wrap(~Region_Name, labeller = labeller(Region_Name = label_wrap_gen(width = 25))) +
  theme_bw() +
@@ -495,9 +520,9 @@ theme(legend.position = "None") +
 #(Outliers have not been removed)
 df_test %>%
 filter(Subsample <= 100) %>%
-    filter(Water_Chemistry_pH <= 14) %>%
+    filter(pH <= 14) %>%
     na.omit() %>%
-ggplot(mapping = aes(x = Water_Chemistry_pH, y = Subsample, colour = Region_Name )) +
+ggplot(mapping = aes(x = pH, y = Subsample, colour = Region_Name )) +
   geom_point(size=2) +
   facet_wrap(~Region_Name, labeller = labeller(Region_Name = label_wrap_gen(width = 25))) +
  theme_bw() +
@@ -517,9 +542,9 @@ theme(legend.position = "None") +
 
 df_status %>%
   filter(Subsample <= 100) %>%
-    filter(Water_Chemistry_pH <= 14) %>%
+    filter(pH <= 14) %>%
   mutate(Status = replace(Status, Status == "Potential Reference", "Reference" )) %>%
-ggplot(mapping = aes(x = Water_Chemistry_pH, y = Subsample, colour = Status) ) +
+ggplot(mapping = aes(x = pH, y = Subsample, colour = Status) ) +
   geom_point(size=3, alpha = 0.3) + 
 facet_wrap(~Status) +
       theme_bw() +
@@ -540,7 +565,7 @@ facet_wrap(~Status) +
 df_ref %>%
 filter(Subsample <= 100) %>%
     na.omit() %>%
-ggplot(mapping = aes(x = Water_Chemistry_pH, y = Abundance, colour = Region_Name )) +
+ggplot(mapping = aes(x = pH, y = Abundance, colour = Region_Name )) +
   geom_point(size=2) +
   facet_wrap(~Region_Name, labeller = labeller(Region_Name = label_wrap_gen(width = 25))) +
  theme_bw() +
@@ -560,8 +585,8 @@ theme(legend.position = "None") +
 df_test %>%
 filter(Subsample <= 100) %>%
     na.omit() %>%
-      filter(Water_Chemistry_pH <= 14) %>%
-ggplot(mapping = aes(x = Water_Chemistry_pH, y = Abundance, colour = Region_Name )) +
+      filter(pH <= 14) %>%
+ggplot(mapping = aes(x = pH, y = Abundance, colour = Region_Name )) +
   geom_point(size=2) +
   facet_wrap(~Region_Name, labeller = labeller(Region_Name = label_wrap_gen(width = 25))) +
  theme_bw() +
@@ -580,9 +605,9 @@ theme(legend.position = "None") +
 
 df_status %>%
   filter(Subsample <= 100) %>%
-    filter(Water_Chemistry_pH <= 14) %>%
+    filter(pH <= 14) %>%
   mutate(Status = replace(Status, Status == "Potential Reference", "Reference" )) %>%
-ggplot(mapping = aes(x = Water_Chemistry_pH, y = Abundance, colour = Status) ) +
+ggplot(mapping = aes(x = pH, y = Abundance, colour = Status) ) +
   geom_point(size=3, alpha = 0.3) + 
 facet_wrap(~Status) +
       theme_bw() +
