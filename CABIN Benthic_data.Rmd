@@ -212,48 +212,49 @@ df_all <- merge(df_both, df_study, by = "Unique_Id", all.x = TRUE)
 Tidy the joined df to get rid of lake/wetland/non wadeable stream sites 
 
 ```{r, echo = FALSE}
-
 #tidy to get rid of wetlands, lakes, etc- make sure to keep NAs
 df_all <- df_all %>%
   filter(is.na(Protocol) | Protocol == "CABIN - Wadeable Streams") %>%
   filter(is.na(Sampling_Device) | Sampling_Device == "Kick Net") %>%
-  #note: we are keeping
+  #note: we are keeping if River or wadeable
   filter(is.na(Type.y) | Type.y  == "River") %>%
   filter(is.na(Mesh_size) | Mesh_size == "400") %>%
   mutate(Status = coalesce(Status.x, Status.y)) %>%
-  mutate(Region = coalesce(Region.x, Region.y)) 
-
+  mutate(Region = coalesce(Region.x, Region.y))
 ```
 
-**Note: many sites don't have Protocol listed at all. For those, I kept them if "Type" == River or NA. Need to find out if these sites are streams or not. (734 sites are Arctic, 233 Maritime, 17 Nelson River, 36 are Northern Quebec and Labrador, 213 Pacific, 135 St Lawrence, 1 Yukon)
-
-**See .csv file
-
 ```{r, include = FALSE}
+#Note: many sites don't have Protocol listed at all. For those, I kept them if "Type" == River or NA, and then Went through this file with Wendy Monk. Borrow pit (1 site) removed. For sites with notes and site name, these are all rivers/streams and can be kept. Sites without any identifying parameters to be deleted (code below).
 
-Protocol_Nas <- df_all[is.na(df_all$Protocol),]
-
+#Protocol_Nas <- df_all[is.na(df_all$Protocol),]
 #write.csv(Protocol_Nas, "No_Protocol_Sites.csv")
 
 ```
 
-Sanity check after merging - count number of test, potential test, and reference sites there are. These should add to 7058 (they do!) and there should be no NAs for Status column
+```{r, echo = FALSE}
 
+#for sites without a Protocol, get rid of the sites that also don't have Type == River.
+df_all <- df_all %>%
+#remove borrow pit
+filter(LocalBasinName != "Borrow Pit" | is.na(LocalBasinName)) %>%
+filter(!is.na(Protocol) | !is.na(Type.y)) #removes 70 sites
+```
+
+Sanity check after merging - count number of test, potential test, and reference sites there are. These should add to 6987 (they do!) and there should be no NAs for Status column
 ```{r, echo = FALSE, include=FALSE}
 
-length(unique(df_all$Unique_Id)) #7058
+length(unique(df_all$Unique_Id)) #6987
 
 num_ref_sites <- sqldf( "select Status, Unique_Id
-                     from df_all Where Status Like '%Refere%' ") #3455
+                     from df_all Where Status Like '%Refere%' ") #3448
 
 
 num_test_sites <- sqldf("select Status, Unique_Id
-                         from df_all where Status LIKE 'Test' ") #3603
+                         from df_all where Status LIKE 'Test' ") #3539
 
-#3455 + 3603 = 7058
+#3448 + 3539 = 6987
 
 #sum(is.na(df_all$Status)) #Check that there are No Nas for "Status"
-
 rm(num_ref_sites, num_test_sites)
 ```
 
