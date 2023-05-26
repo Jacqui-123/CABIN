@@ -3,11 +3,19 @@
 
 Preliminary wrangling, tidying and exploration for benthic data within all regions sampled in Canada within the Canadian Aquatic Biomonitoring Network (CABIN). 
 
-CABIN is an aquatic biomonitoring program for freshwater ecosystems that began in 1987. Sites are divided in to "Reference" , or "Test" sites.
+CABIN is an aquatic biomonitoring program for freshwater ecosystems that began in 1987. Sites are divided by "Reference", or "Test" sites.
 
 Reference sites represent sites without industrial, agriculture, or development activity. Test sites may or may not have similar activity, and data from the reference sites is used to assess changes to macroinvertebrate communities, water chemistry, and habitat. 
 
-Here, we graphically explore the differences between test and reference sites to see if a) we can detect a difference in pH, macroinvertebrate abundance, and percent sorted between test and reference sites.
+This data set is a collection of 30 or so spreadsheets from different regions, with different site visit identifiers and variables across each type of spreadsheet ("study", "habitat" and "benthic"). This is an example of how to aggregate and sort somewhat disparate data from different sources for graphing and exploration.
+
+The differences between test and reference sites are graphed here for the initial analysis to begin to see if a) we can detect a difference in pH, macroinvertebrate abundance, and percent sorted between test and reference sites. Further analyses are coming, and will be done with the MVAbund package in R for multivariate environmental data. 
+
+Data retrieved from the open source data set: https://open.canada.ca/data/en/dataset/13564ca4-e330-40a5-9521-bfb1be767147
+
+Open-sourced R packages used: tidyverse, tidyhydat, zoo, lubridate, ggplot, scales, data.table
+
+source code with quality control methods for this dataset:  https://github.com/Jacqui-123/CABIN/blob/main/CABIN%20Benthic_data.Rmd
 
 ```{r, echo = FALSE, include = FALSE}
 library(png)
@@ -17,32 +25,29 @@ library(reticulate)
 library(zoo)
 library(lubridate)
 library(ggplot2)
-library(sf)
-library(mapview)
-library(gridExtra)
 library(data.table)
-library(scales) 
-library(sqldf)
 library(hexbin)
+library(knitr)
+library(sqldf)
+library(scales)
+
 ```
 
 ### 1) Load in the data
-Benthic CABIN data in one dataframe, with a column of region
+Smoosh all the benthic datasheets into one dataframe, with a column of region to be able to keep track of the different regions each data set originally came from. Do the same thing for the "study" and "habitat" spreadsheets.
 ```{r}
 library(data.table)
 files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_benthic.*?\\.csv", full.names = TRUE) 
 df_benthic <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
+#do this for all files
 ```
 
--Load in Study (meta) CABIN data in one dataframe, with a column of the region.
-This has the lat/long coordinates (code not shown, see above)
 ```{r, echo = FALSE, include = FALSE}
 library(data.table)
 files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_study.*?\\.csv", full.names = TRUE) 
 df_study <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id = "Region", encoding = 'Latin-1') 
 ```
 
--Load in the Habitat data, with a column for each region. (code not shown, see above)
 ```{r, echo = FALSE, include = FALSE}
 library(data.table)
 files <- list.files(path = "/Users/LevyJ/Desktop/CABIN", pattern = "^cabin_habitat.*?\\.csv", full.names = TRUE) 
@@ -52,7 +57,7 @@ df_habitat <- map_df(files, ~read_csv(., col_types = cols(.default = "c")), .id 
 ### 2) Data Tidying 
 a\) Benthic Data
 
--Rename the columns to be easier to work with. (code not shown)
+-Rename the columns to English and standard characters to be easier to work with. (code not shown)
 ```{r, echo = FALSE, include = FALSE}
 df_benthic <- df_benthic %>%
   rename("Site_Visit_ID" = 'SiteVisitID/IdentifiantdeVisite',
@@ -81,16 +86,14 @@ df_benthic <- df_benthic %>%
          "ITIS" ="ITIS_TSN",
          "Valid" = "Valid/Valide")
 ```
-
--Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-". This is so we have a unique id for each site visit and year.
+-Create a new column “unique ID” with the site visit ID, site, and year separated by a “-”. This is so we have a unique id for each site visit and year. This was done for each set of spreadsheet to create a unique identifier for each site visit that can be used across all types of datasheets.
 ```{r}
 df_benthic <- df_benthic %>%
   tidyr::unite("Unique_Id", c("Site_Visit_ID", "Site", "Year" ), sep = "_", remove = TRUE) 
-
 ```
 
 -Select only kick net samples, sample # = 1, mesh size 400, and calculate the total abundance for each unique site. Individual taxa are removed for now. 
-```{r}
+```{r, echo = FALSE, include = FALSE}
 #change count column to numeric data
 df_benthic$Count = as.numeric(as.character(df_benthic$Count) )
 df_benthic$Count <- round (df_benthic$Count, digits = 0)
@@ -108,14 +111,12 @@ df_benthic <- df_benthic %>%
 ```
 
 b\) Study data tidying:
-
--(Study data columns were renamed in excel)
-
--Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-" (code not shown, see above)
-
--Keep only the "River" sites, as some are lake or wetland sites. We are taking a conservative approach here
+-Create a unique site identifier to be able to accurately match up data
+-Keep only the "River" sites, as some are lake or wetland sites.
 
 ```{r, echo = FALSE, include = FALSE}
+#-(Study data columns had to be renamed in excel)
+#-Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-" (code not shown, see above)
 
 df_study <- df_study %>%
    #some sites have type = lake or wetland, we want to remove these
@@ -124,11 +125,13 @@ df_study <- df_study %>%
 
 ```
 
-c\) Habitat data tidying:
+c\) Habitat data tidying: 
+ 
+-Create a unique site identifier to be able to accurately match up data
 
--Rename to make the habitat data easier to work with. (code not shown)
-Unit, year, sample_number were renamed in excel. 
 ```{r, echo=FALSE, include=FALSE}
+#-Rename to make the habitat data easier to work with.
+#Unit, year, sample_number were renamed in excel.
 
 df_habitat <- df_habitat %>%
   rename("Site_Visit_Id" = 'SiteVisitID/IdentifiantdeVisite',
@@ -140,18 +143,18 @@ df_habitat <- df_habitat %>%
          "Value" = "Value/Valeur",
          "Computed" = "Computed/Calculé",
          "Notes" = "Note/Remarque" ) %>%
+  #deal with status being 1 in this dataset but reference or test etc in the others
   mutate(Status = replace(Status, Stat_Num == "1", "Reference" ),
          Status = replace(Status, Stat_Num =="2", "Test"),
          Status = replace(Status, Stat_Num == "3", "Potential Reference")) %>%
   dplyr::select(Region, Site_Visit_Id, Site, Protocol, Julian_day, Year, Sample_Number, Status, Stat_Num, QAQC, Type, Variable, VariableDescription, Unit, Value, MDL, Computed, Notes)
 ```
 
--Mutate a new column "unique ID" with the site visit ID, site, and year separated by a "-" (code not shown, see above)
 
 ```{r, echo= FALSE, include=FALSE}
 #-removed the 65 NAs for Protocol and Site - these are where the previous line from MDL/notes/computed #continued on the next line and entered "<0.0005 mg/L" etc for site. Deleted these, but might be missing #some data for these sites - 
 
-#*NOTE: can delete valus from hab #5 spreadsheet with all the weird values for site - we confirmed that it doesn't delete data.**
+#*NOTE: can delete valus from hab #5 spreadsheet with all the weird values for site - I confirmed that it doesn't delete data.**
 df_habitat <-df_habitat %>%
   #drop_na(Protocol)  %>%
 tidyr::unite("Unique_Id", c("Site_Visit_Id", "Site", "Year" ), sep = "_", remove = TRUE )
@@ -185,7 +188,7 @@ df_habitat <- df_habitat %>%
 
 ### 3) Merge data together
 
--Change df to Data.tables for quicker processing speed using the data.table vignette (code not shown)
+-Change df to Data.tables for quicker processing speed using the data.table vignette
 ```{r, echo = FALSE, include = FALSE}
 setDT(df_benthic)
 setDT(df_study)
@@ -194,9 +197,9 @@ setDT(df_habitat)
 
 -Join the three data tables together. 
 
-```{r, echo = FALSE}
+```{r}
 
-#merge benthic and habitat data, keeping everything: 
+#merge on benthic and habitat data, keeping everything: 
 
 df_both<- merge(df_habitat, df_benthic, by = "Unique_Id", all = TRUE)
 
@@ -204,14 +207,13 @@ df_both<- merge(df_habitat, df_benthic, by = "Unique_Id", all = TRUE)
 
 df_all <- merge(df_both, df_study, by = "Unique_Id", all.x = TRUE)
 
-#length(unique(df_all$Unique_Id)) #12408
+#length(unique(df_all$Unique_Id)) #sanity check, should be 12408
 
 ```
 
-
 Tidy the joined df to get rid of lake/wetland/non wadeable stream sites 
 
-```{r, echo = FALSE}
+```{r}
 #tidy to get rid of wetlands, lakes, etc- make sure to keep NAs
 df_all <- df_all %>%
   filter(is.na(Protocol) | Protocol == "CABIN - Wadeable Streams") %>%
@@ -235,13 +237,13 @@ df_all <- df_all %>%
 
 #for sites without a Protocol, get rid of the sites that also don't have Type == River.
 df_all <- df_all %>%
-#remove borrow pit
+#remove borrow pit, it's a pit...not a river...
 filter(LocalBasinName != "Borrow Pit" | is.na(LocalBasinName)) %>%
 filter(!is.na(Protocol) | !is.na(Type.y)) #removes 70 sites
 ```
 
-Sanity check after merging - count number of test, potential test, and reference sites there are. These should add to 6987 (they do!) and there should be no NAs for Status column
 ```{r, echo = FALSE, include=FALSE}
+#Sanity check after merging - count number of test, potential test, and reference sites there are. These should add to 6987 (they do!) and there should be no NAs for Status column
 
 length(unique(df_all$Unique_Id)) #6987
 
@@ -258,10 +260,10 @@ num_test_sites <- sqldf("select Status, Unique_Id
 rm(num_ref_sites, num_test_sites)
 ```
 
--Load in the region names and add to the merged dfs using the region names file (file made in excel)
+
 
 ```{r, echo = FALSE, include = FALSE}
-
+#-Load in the region names and add to the merged dfs using the region names file (file made in excel)
 Region_names <- read.csv("Region_names.csv", colClasses =c("character", "character", "character")) 
 df_all <- full_join(df_all, Region_names, by = 'Region') 
 
@@ -276,7 +278,7 @@ rm(Region_names)
 
 ### 4) Get ready to graph 
 
--Tidy and reformat df_all pH data (code not shown)
+-Tidy and reformat df_all pH and alkalinity data so that it is as numeric, and has the correct number of digits
 ```{r, echo = FALSE, include = FALSE}
 
 setDT(df_all)
@@ -292,7 +294,7 @@ df_all <- df_all %>%
 
 ```
 
--Graphing prep: make separate data.table for test, reference, and all sites for quicker processing (code not shown)
+-Graphing prep: make separate data.table for test, reference, and all sites for quicker processing
 ```{r, echo= FALSE, include = FALSE}
 
 sum(is.na(df_all$Status)) #double check no Nas for status
@@ -321,7 +323,7 @@ df_status <- df_all %>%
 
 ```
 
--Make graphing functions (boxplot code shown)
+-Make a boxplot function so that it's easier to make multiple graphs with different inputs
 ```{r}
 #Graphing function: boxplot 
 boxplot <- function(data, x, y, fill, title, ylabtitle) {
@@ -331,14 +333,12 @@ geom_boxplot() +
   theme_bw() +
   geom_point() +
     theme(plot.title =  element_text(size = 10, hjust = .5, face = "bold")) +
-       #  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
    stat_boxplot(geom = "errorbar", width = 0.25) +
   ggtitle({{title}}) +
    ylab({{ylabtitle}}) +
  theme(legend.position = 'none') +
 scale_x_discrete(labels = wrap_format(10)) +
   viridis::scale_fill_viridis(discrete = TRUE)
-    
     print(p)
 }
 
